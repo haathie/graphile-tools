@@ -1,0 +1,9 @@
+.env.production
+node_modules
+.build
+.serverless
+.DS_Store
+port-data
+src/test.ts
+lib
+dev/pg_data

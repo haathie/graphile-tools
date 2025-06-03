@@ -1,0 +1,14 @@
+{
+  "extends": "@haathie/rest-api-builder",
+  "compilerOptions": {
+    "outDir": "lib"
+  },
+  "include": [
+    "src/*.ts", 
+    "src/*/*.ts"
+  ],
+  "exclude": [
+    "node_modules", 
+    "src/tests"
+  ]
+}

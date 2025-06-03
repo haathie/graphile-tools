@@ -1,0 +1,19 @@
+services:
+  postgres:
+    image: ghcr.io/haathie/postgres:13232e86f3e5b9b0f8bc09a536e4328ff6ba198b
+    environment:
+      POSTGRES_PASSWORD: ''
+      POSTGRES_HOST_AUTH_METHOD: trust
+      POSTGRES_DB: im-contacts
+    ports:
+      - '5432:5432'
+    # volumes:
+    #   - ./dev/pg_data:/var/lib/postgresql/data
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 4096m
+        reservations:
+          cpus: '0.1'
+          memory: 256m

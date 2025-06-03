@@ -1,0 +1,9 @@
+# Ignore artifacts:
+lib
+coverage
+*.lock
+.eslintrc.json
+src/types/gen.ts
+src/migrations
+jest.config.js
+src/routes/index.ts
