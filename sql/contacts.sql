@@ -25,6 +25,13 @@ BEGIN
 END
 $$ LANGUAGE plpgsql VOLATILE PARALLEL SAFE;
 
+CREATE OR REPLACE FUNCTION app.current_actor_id()
+RETURNS VARCHAR(64) AS $$
+BEGIN
+	RETURN COALESCE(current_setting('app.user_id', true), 'system');
+END
+$$ LANGUAGE plpgsql STABLE PARALLEL SAFE;
+
 -- Create the Contact table
 CREATE TABLE app.contacts (
 	id VARCHAR(24) PRIMARY KEY DEFAULT app.create_object_id('cnt'),
@@ -33,7 +40,7 @@ CREATE TABLE app.contacts (
 	name VARCHAR(255),
 	platform_names VARCHAR(255)[] DEFAULT '{}',
 	created_at TIMESTAMPTZ DEFAULT NOW(),
-	created_by VARCHAR(64) DEFAULT current_setting('app.user_id'),
+	created_by VARCHAR(64) DEFAULT app.current_actor_id(),
 	updated_at TIMESTAMPTZ DEFAULT NOW(),
 	phone_number BIGINT,
 	email VARCHAR(128),
@@ -47,6 +54,12 @@ CREATE TABLE app.contacts (
 	UNIQUE (org_id, phone_number),
 	UNIQUE (org_id, email)
 );
+
+-- remove unnecessary constraints & info to be exposed on the graphQL API
+comment on table app.contacts is $$
+@behavior -*
+@name contacts_base
+$$;
 
 -- Trigger to set updated_at
 CREATE FUNCTION app.set_updated_at()
@@ -64,21 +77,16 @@ CREATE TRIGGER set_updated_at_trigger
 -- Trigger function to handle assignment tracking
 CREATE OR REPLACE FUNCTION app.handle_contact_assignment()
 RETURNS TRIGGER AS $$
-DECLARE
-	new_assigned_by VARCHAR;
 BEGIN
-	new_assigned_by := COALESCE(
-		current_setting('app.user_id', true), 'system'
-	);
 	-- On INSERT: if assignee is being set, set assignment metadata
 	IF TG_OP = 'INSERT' AND NEW.assignee IS NOT NULL THEN
 		NEW.assigned_at := clock_timestamp();
-		NEW.assigned_by := new_assigned_by;
+		NEW.assigned_by := app.current_actor_id();
 		NEW.first_assigned_at := clock_timestamp();
 	-- On UPDATE: if assignee is being changed
 	ELSIF TG_OP = 'UPDATE' AND NEW.assignee IS NOT NULL AND NEW.assignee <> OLD.assignee THEN
 		NEW.assigned_at := clock_timestamp();
-		NEW.assigned_by := new_assigned_by;
+		NEW.assigned_by := app.current_actor_id();
 		-- Set first_assigned_at only if it's currently NULL
 		IF OLD.first_assigned_at IS NULL THEN
 			NEW.first_assigned_at := clock_timestamp();
@@ -114,20 +122,72 @@ WITH CHECK (
 	org_id = current_setting('app.org_id')
 );
 
--- CREATE TABLE app.tags (
--- 	id VARCHAR(24) PRIMARY KEY DEFAULT app.create_object_id('tag'),
--- 	org_id VARCHAR(64) NOT NULL,
--- 	name VARCHAR(64) NOT NULL,
--- 	created_at TIMESTAMPTZ DEFAULT NOW(),
--- 	created_by VARCHAR(64) NOT NULL
--- );
+CREATE TABLE app.tags (
+	id VARCHAR(24) PRIMARY KEY DEFAULT app.create_object_id('tag'),
+	org_id VARCHAR(64) DEFAULT current_setting('app.org_id'),
+	name VARCHAR(64) NOT NULL,
+	created_at TIMESTAMPTZ DEFAULT NOW(),
+	created_by VARCHAR(64) DEFAULT app.current_actor_id(),
+	UNIQUE (org_id, name)
+);
 
--- CREATE TABLE app.contact_tags (
--- 	contact_id VARCHAR(24) NOT NULL
--- 		REFERENCES app.contacts(id) ON DELETE CASCADE,
--- 	tag_id VARCHAR(24) NOT NULL
--- 		REFERENCES app.tags(id) ON DELETE CASCADE,
--- 	created_at TIMESTAMPTZ DEFAULT NOW(),
--- 	created_by VARCHAR(64) NOT NULL,
--- 	PRIMARY KEY (contact_id, tag_id)
--- );
+-- Enable Row Level Security on all tables
+ALTER TABLE app.tags ENABLE ROW LEVEL SECURITY;
+GRANT
+  SELECT,
+	INSERT(name),
+	UPDATE(name),
+	DELETE
+ON app.tags TO "app_user";
+-- Create RLS policies for contacts table
+CREATE POLICY tags_team_isolation ON app.tags
+FOR ALL TO "app_user"
+USING (
+	org_id = current_setting('app.org_id')
+)
+WITH CHECK (
+	org_id = current_setting('app.org_id')
+);
+
+CREATE TABLE app.contact_tags (
+	contact_id VARCHAR(24) NOT NULL
+		REFERENCES app.contacts(id) ON DELETE CASCADE,
+	tag_id VARCHAR(24) NOT NULL
+		REFERENCES app.tags(id) ON DELETE CASCADE,
+	created_at TIMESTAMPTZ DEFAULT NOW(),
+	created_by VARCHAR(64) NOT NULL DEFAULT app.current_actor_id(),
+	PRIMARY KEY (contact_id, tag_id)
+);
+
+CREATE TYPE app.tag_info AS (
+	id VARCHAR(24),
+	name VARCHAR(64),
+	added_at TIMESTAMPTZ
+);
+
+CREATE MATERIALIZED VIEW app.contacts_full_m AS (
+	SELECT
+		c.*,
+		ARRAY_REMOVE(
+			ARRAY_AGG((ct.tag_id, t.name, ct.created_at)::app.tag_info),
+			-- removes NULL values from the array
+			(NULL,NULL,NULL)::app.tag_info
+		) AS tags
+	FROM app.contacts c
+	LEFT JOIN app.contact_tags ct ON c.id = ct.contact_id
+	LEFT JOIN app.tags t ON t.id = ct.tag_id
+	GROUP BY c.id
+	ORDER BY c.id DESC
+);
+-- indices for faster access
+CREATE INDEX ON app.contacts_full_m (org_id, id);
+
+CREATE VIEW app.contacts_full AS (
+	SELECT * FROM app.contacts_full_m
+	WHERE org_id = current_setting('app.org_id')
+);
+COMMENT ON VIEW app.contacts_full is $$
+@name contacts
+$$;
+
+GRANT SELECT ON app.contacts_full TO "app_user";

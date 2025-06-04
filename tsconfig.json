@@ -1,14 +1,19 @@
 {
-  "extends": "@haathie/rest-api-builder",
   "compilerOptions": {
-    "outDir": "lib"
+    "lib": ["ES2022"],
+    "moduleResolution": "nodenext",
+    "module": "nodenext",
+    "outDir": "lib",
+    "erasableSyntaxOnly": true,
+    "rewriteRelativeImportExtensions": true,
+    "rootDir": "src"
   },
   "include": [
     "src/*.ts", 
-    "src/*/*.ts"
+    "src/graphile.config.ts",
+    "src/**/*.ts"
   ],
   "exclude": [
-    "node_modules", 
-    "src/tests"
+    "node_modules"
   ]
 }
