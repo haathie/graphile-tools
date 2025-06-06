@@ -5,12 +5,14 @@ import { makePgService } from 'postgraphile/adaptors/pg'
 // The standard base preset to use, includes the main PostGraphile features
 import { PostGraphileAmberPreset } from 'postgraphile/presets/amber'
 import 'postgraphile'
+import { ReasonableLimitsPlugin } from './plugin/reasonable-limits.ts'
 
 const preset: GraphileConfig.Preset = {
 	extends: [
 		PostGraphileAmberPreset,
 		PgSimplifyInflectionPreset
 	],
+	plugins: [ReasonableLimitsPlugin],
 	disablePlugins: ['NodePlugin'],
 	pgServices: [
 		/* list of PG database configurations, e.g.: */
@@ -18,9 +20,9 @@ const preset: GraphileConfig.Preset = {
 			// Database connection string, read from an environmental variable:
 			connectionString: process.env.PG_URI,
 			pgSettings(ctx) {
-				const teamId = ctx.node.req.headers['org-id']
+				let teamId = ctx.node.req.headers['org-id']
 				if(typeof teamId !== 'string') {
-					throw new Error('Missing org-id header')
+					teamId = 'default-org-id'
 				}
 
 				return { 'role': 'app_user', 'app.org_id': teamId, 'app.user_id': 'ad_singh' }
@@ -33,8 +35,12 @@ const preset: GraphileConfig.Preset = {
 			schemas: ['app'],
 		}),
 	],
+	grafserv: { watch: true },
 	grafast: {
 		explain: true,
+	},
+	schema: {
+		defaultBehavior: '-single',
 	},
 }
 

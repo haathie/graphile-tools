@@ -57,8 +57,7 @@ CREATE TABLE app.contacts (
 
 -- remove unnecessary constraints & info to be exposed on the graphQL API
 comment on table app.contacts is $$
-@behavior -*
-@name contacts_base
+@foreignConnectionFieldName tags
 $$;
 
 -- Trigger to set updated_at
@@ -159,35 +158,68 @@ CREATE TABLE app.contact_tags (
 	PRIMARY KEY (contact_id, tag_id)
 );
 
-CREATE TYPE app.tag_info AS (
-	id VARCHAR(24),
-	name VARCHAR(64),
-	added_at TIMESTAMPTZ
-);
-
-CREATE MATERIALIZED VIEW app.contacts_full_m AS (
-	SELECT
-		c.*,
-		ARRAY_REMOVE(
-			ARRAY_AGG((ct.tag_id, t.name, ct.created_at)::app.tag_info),
-			-- removes NULL values from the array
-			(NULL,NULL,NULL)::app.tag_info
-		) AS tags
-	FROM app.contacts c
-	LEFT JOIN app.contact_tags ct ON c.id = ct.contact_id
-	LEFT JOIN app.tags t ON t.id = ct.tag_id
-	GROUP BY c.id
-	ORDER BY c.id DESC
-);
--- indices for faster access
-CREATE INDEX ON app.contacts_full_m (org_id, id);
-
-CREATE VIEW app.contacts_full AS (
-	SELECT * FROM app.contacts_full_m
-	WHERE org_id = current_setting('app.org_id')
-);
-COMMENT ON VIEW app.contacts_full is $$
-@name contacts
+comment on constraint contact_tags_contact_id_fkey on app.contact_tags is $$
+@foreignConnectionFieldName tags
+@behaviour +single
+$$;
+comment on constraint contact_tags_tag_id_fkey on app.contact_tags is $$
+@behaviour +single
 $$;
 
-GRANT SELECT ON app.contacts_full TO "app_user";
+ALTER TABLE app.contact_tags ENABLE ROW LEVEL SECURITY;
+GRANT
+	SELECT,
+	INSERT(contact_id, tag_id),
+	DELETE
+ON app.contact_tags TO "app_user";
+-- Create RLS policies for contact_tags table
+CREATE POLICY contact_tags_team_isolation ON app.contact_tags
+FOR ALL TO "app_user"
+USING (
+	contact_id IN (
+		SELECT id FROM app.contacts
+		WHERE org_id = current_setting('app.org_id')
+	)
+)
+WITH CHECK (
+	contact_id IN (
+		SELECT id FROM app.contacts
+		WHERE org_id = current_setting('app.org_id')
+	)
+);
+
+-- CREATE TYPE app.tag_info AS (
+-- 	id VARCHAR(24),
+-- 	name VARCHAR(64),
+-- 	added_at TIMESTAMPTZ
+-- );
+
+-- CREATE MATERIALIZED VIEW app.contacts_full_m AS (
+-- 	SELECT
+-- 		c.*,
+-- 		ARRAY_REMOVE(
+-- 			ARRAY_AGG((ct.tag_id, t.name, ct.created_at)::app.tag_info),
+-- 			-- removes NULL values from the array
+-- 			(NULL,NULL,NULL)::app.tag_info
+-- 		) AS tags
+-- 	FROM app.contacts c
+-- 	LEFT JOIN app.contact_tags ct ON c.id = ct.contact_id
+-- 	LEFT JOIN app.tags t ON t.id = ct.tag_id
+-- 	GROUP BY c.id
+-- );
+-- -- indices for faster access
+-- CREATE INDEX ON app.contacts_full_m (org_id, id);
+
+-- CREATE VIEW app.contacts_full AS (
+-- 	SELECT * FROM app.contacts_full_m
+-- 	WHERE org_id = current_setting('app.org_id')
+-- );
+-- COMMENT ON VIEW app.contacts_full is $$
+-- @name contacts
+-- @primaryKey id
+-- $$;
+-- COMMENT ON COLUMN app.contacts_full.id is $$
+-- @behaviour orderBy
+-- $$;
+
+-- GRANT SELECT ON app.contacts_full TO "app_user";
