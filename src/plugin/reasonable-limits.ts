@@ -1,67 +1,91 @@
+import type { PgCodec } from 'postgraphile/@dataplan/pg'
 import { sideEffect } from 'postgraphile/grafast'
-import type { GraphQLArgument, GraphQLFieldMap } from 'postgraphile/graphql'
-import { makeProcessSchemaPlugin } from 'postgraphile/utils'
 
 const MAX_RECORDS_PER_PAGE = 100
 const DEFAULT_RECORDS_PER_PAGE = 10
+const MAX_RECORDS_TAG = 'maxRecordsPerPage'
+const DEFAULT_RECORDS_TAG = 'defaultRecordsPerPage'
 
-export const ReasonableLimitsPlugin = makeProcessSchemaPlugin(schema => {
-	// Get the Query type
-	const queryType = schema.getType('Query')
-	if(!('getFields' in queryType)) {
-		console.warn('ReasonableLimits: Query type does not have fields, skipping plugin application.')
-		return schema
-	}
+export const ReasonableLimitsPlugin: GraphileConfig.Plugin = {
+	name: 'ReasonableLimitsPlugin',
+	schema: {
+		hooks: {
+			'GraphQLObjectType_fields_field_args_arg'(input, build, ctx) {
+				const {
+					scope: {
+						pgFieldResource,
+						isPgFieldConnection,
+						isPgManyRelationConnectionField,
+						fieldName,
+						argName
+					}
+				} = ctx
+				const codec = pgFieldResource?.codec as PgCodec
+				const isLimitField = codec
+					&& (isPgFieldConnection || isPgManyRelationConnectionField)
+					&& (argName === 'first' || argName === 'last')
+				const isFirst = argName === 'first'
+				if(!isLimitField) {
+					return input
+				}
 
-	const fields = queryType.getFields() as GraphQLFieldMap<any, any>
-	const allQueries = Object.entries(fields)
-	for(const [name, field] of allQueries) {
-		if(!('args' in field)) {
-			continue
-		}
-
-		const offsetArgIdx = field.args.findIndex(a => a.name === 'offset')
-		if(offsetArgIdx !== -1) {
-			// Remove the "offset" argument
-			field.args = field.args.filter((_, idx) => idx !== offsetArgIdx)
-			console.debug(
-				`ReasonableLimits: Removed "offset" argument from field "${name}"`
-			)
-		}
-
-		const lastArg = field.args.find(a => a.name === 'last')
-		if(lastArg) {
-			setLimitOnIntArg(lastArg, MAX_RECORDS_PER_PAGE)
-			console.debug(
-				`ReasonableLimits: Updated "last" argument for field "${name}"`
-			)
-		}
-
-		const firstArg = field.args.find(a => a.name === 'first')
-		if(firstArg) {
-			firstArg.defaultValue = DEFAULT_RECORDS_PER_PAGE
-			setLimitOnIntArg(firstArg, MAX_RECORDS_PER_PAGE)
-
-			console.debug(
-				`ReasonableLimits: Updated "first" argument for field "${name}"`
-			)
-		}
-	}
-
-	return schema
-})
-
-function setLimitOnIntArg(arg: GraphQLArgument, max: number) {
-	const ogPlan = arg.extensions.grafast.applyPlan
-	arg.extensions.grafast.applyPlan = (plan, fieldPlan, input, info) => {
-		sideEffect(input.getRaw(), f => {
-			if(typeof f === 'number' && f > max) {
-				throw new Error(
-					`Maximum of ${max} records can be requested per page`
+				const defaultValue = isFirst
+					? getIntTag(DEFAULT_RECORDS_TAG) || DEFAULT_RECORDS_PER_PAGE
+					: undefined
+				const maxValue = getIntTag(MAX_RECORDS_TAG) || MAX_RECORDS_PER_PAGE
+				const relation = isPgManyRelationConnectionField
+					? pgFieldResource.name
+					: 'query'
+				console.debug(
+					`ReasonableLimits: Applying limits to "${argName}" argument`
+					+ ` of ${relation}."${fieldName}". Max: ${maxValue}`
+					+ (
+						typeof defaultValue === 'number'
+							? `, default: ${defaultValue}`
+							: ''
+					)
 				)
-			}
-		})
 
-		return ogPlan(plan, fieldPlan, input, info)
+
+				if(
+					typeof input.defaultValue === 'undefined'
+					&& typeof defaultValue === 'number'
+				) {
+					input.defaultValue = defaultValue
+				}
+
+				const ogPlan = input.applyPlan
+				input.applyPlan = (plan, fieldPlan, input, info) => {
+					sideEffect(input.getRaw(), f => {
+						if(typeof f === 'number' && f > maxValue) {
+							throw new Error(
+								`Maximum of ${maxValue} records can be requested per page`
+							)
+						}
+					})
+
+					return ogPlan(plan, fieldPlan, input, info)
+				}
+
+				return input
+
+				function getIntTag(tag: string) {
+					const tags = codec.extensions?.tags
+					const defaultValue = tags?.[tag]
+					if(typeof defaultValue === 'undefined') {
+						return undefined
+					}
+
+					const defaultValueNum = +defaultValue
+					if(!Number.isInteger(defaultValueNum) || defaultValueNum <= 0) {
+						throw new Error(
+							`"${DEFAULT_RECORDS_TAG}" must be a +int, got "${defaultValue}"`
+						)
+					}
+
+					return defaultValueNum
+				}
+			}
+		}
 	}
 }
