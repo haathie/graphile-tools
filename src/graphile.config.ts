@@ -5,6 +5,7 @@ import { makePgService } from 'postgraphile/adaptors/pg'
 // The standard base preset to use, includes the main PostGraphile features
 import { PostGraphileAmberPreset } from 'postgraphile/presets/amber'
 import 'postgraphile'
+import { FancyMutationsPlugin } from './plugin/fancy-mutations/index.ts'
 import { ReasonableLimitsPlugin } from './plugin/reasonable-limits.ts'
 
 const preset: GraphileConfig.Preset = {
@@ -12,7 +13,10 @@ const preset: GraphileConfig.Preset = {
 		PostGraphileAmberPreset,
 		PgSimplifyInflectionPreset
 	],
-	plugins: [ReasonableLimitsPlugin],
+	plugins: [
+		// ReasonableLimitsPlugin,
+		FancyMutationsPlugin
+	],
 	disablePlugins: ['NodePlugin'],
 	pgServices: [
 		/* list of PG database configurations, e.g.: */
