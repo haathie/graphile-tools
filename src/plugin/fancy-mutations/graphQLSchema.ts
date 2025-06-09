@@ -1,5 +1,5 @@
 import { type GraphQLFieldConfig, GraphQLInputObjectType, GraphQLList, GraphQLObjectType, type GraphQLObjectTypeConfig } from 'graphql'
-import { listOfCodec, type PgClient, type PgCodecWithAttributes, PgResource, recordCodec, TYPES, withPgClientTransaction } from 'postgraphile/@dataplan/pg'
+import { type PgClient, type PgCodecWithAttributes, PgResource, TYPES, withPgClientTransaction } from 'postgraphile/@dataplan/pg'
 import { type FieldPlanResolver, object, sideEffect, type Step } from 'postgraphile/grafast'
 import { sql } from 'postgraphile/pg-sql2'
 import { insertData, type SimplePgClient } from './pg-utils.ts'
@@ -84,8 +84,12 @@ function createInsertObject(
 		executor.name.length + 1
 	)
 
-	const pkeyColumnsJoined = sql
-		.join(primaryKey.attributes.map(a => sql.identifier(a)), ',')
+	const pkeyColumnsJoined = sql.join(
+		primaryKey.attributes.map(a => (
+			sql`${sql.identifier(a)} ${codec.attributes[a].codec.sqlType}`
+		)),
+		','
+	)
 	const propToColumnMap: Record<string, string> = {}
 	const primaryKeyNames: string[] = []
 	for(const attributeName in codec.attributes) {
@@ -155,17 +159,19 @@ function createInsertObject(
 		$items.join(
 			{
 				type: 'inner',
-				from: sql`unnest(${$items.placeholder($tx, listOfCodec(TYPES.jsonb), true)}) WITH ORDINALITY`,
-				alias: sql`items(data, ord)`,
+				from: sql`ROWS FROM (
+					jsonb_to_recordset(${$items.placeholder($tx, TYPES.jsonb, true)})
+					AS (${pkeyColumnsJoined})) WITH ORDINALITY`,
+				alias: sql`items`,
 				conditions: primaryKey.attributes.map(a => (
-					sql`${$items.alias}.${sql.identifier(a)} = items.data->>'${sql.raw(a)}'`
+					sql`${$items.alias}.${sql.identifier(a)} = items.${sql.identifier(a)}`
 				))
 			}
 		)
 		// order by the ordinal position
 		// so that the items are returned in the same order as they were inserted
 		$items.orderBy({
-			fragment: sql`items.ord`,
+			fragment: sql`items.ordinality`,
 			codec: TYPES.int,
 			direction: 'ASC'
 		})
@@ -177,7 +183,7 @@ function createInsertObject(
 	async function executeAsync(
 		client: PgClient,
 		{ items }: MutationInput
-	): Promise<any[]> {
+	): Promise<string> {
 		const { rows } = await insertData(
 			items,
 			mapToSimplePgClient(client),
@@ -190,7 +196,7 @@ function createInsertObject(
 			}
 		)
 
-		return rows
+		return JSON.stringify(rows)
 	}
 }
 
