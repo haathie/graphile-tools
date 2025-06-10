@@ -104,6 +104,9 @@ async function _mergeData<T>(
 	let updateStr = propsToUpdate
 		?.map(c => `"${propertyColumnMap[c]}" = i."${propertyColumnMap[c]}"`)
 		?.join(',')
+	// we use an update string that basically does nothing to handle
+	// onConflict.type === 'ignore', so we get the properties of the existing
+	// entity back in the result.
 	if(!updateStr) {
 		const firstProp = propertyColumnMap[propsToInsert[0]]
 		updateStr = `${firstProp} = t."${firstProp}"`
@@ -154,11 +157,18 @@ async function _mergeData<T>(
 	)
 	await client.query(`DROP TABLE ${tmpTableName};`)
 
-	if(returningColumnsStr && rslt.rows.length !== data.length) {
-		throw new Error(
-			`INTERNAL(_mergeData): ${rslt.rows.length} rows `
-			+ `returned, expected ${data.length}`
-		)
+	if(returningColumnsStr) {
+		if(rslt.rows.length !== data.length) {
+			throw new Error(
+				`INTERNAL(_mergeData): ${rslt.rows.length} rows `
+				+ `returned, expected ${data.length}`
+			)
+		}
+
+		if(onConflict.type === 'ignore') {
+			rslt.rowCount = rslt.rows
+				.filter(r => r['action'] !== 'UPDATE').length
+		}
 	}
 
 	return rslt

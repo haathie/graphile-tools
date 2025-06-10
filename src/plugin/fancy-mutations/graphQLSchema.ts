@@ -1,6 +1,7 @@
-import { type GraphQLFieldConfig, GraphQLInputObjectType, GraphQLList, GraphQLNonNull, GraphQLObjectType, type GraphQLObjectTypeConfig } from 'graphql'
+import { type GraphQLFieldConfig, GraphQLInputObjectType, GraphQLInt, GraphQLList, GraphQLNonNull, GraphQLObjectType, type GraphQLObjectTypeConfig } from 'graphql'
+import type { QueryResult } from 'pg'
 import { type PgClient, type PgCodecWithAttributes, PgResource, TYPES, withPgClientTransaction } from 'postgraphile/@dataplan/pg'
-import { type FieldPlanResolver, object, sideEffect, type Step } from 'postgraphile/grafast'
+import { type FieldPlanResolver, lambda, sideEffect, type Step } from 'postgraphile/grafast'
 import { GraphQLEnumType } from 'postgraphile/graphql'
 import { sql } from 'postgraphile/pg-sql2'
 import { insertData, type SimplePgClient } from './pg-utils.ts'
@@ -18,7 +19,9 @@ type CreateMutationOpts = {
 	build: GraphileBuild.Build
 }
 
-type GrafastPlanParams = Parameters<FieldPlanResolver<any, any, any>>
+type GrafastPlanParams<T extends Step = Step> = Parameters<
+	FieldPlanResolver<any, T, any>
+>
 
 type MutationInput<T = any> = {
 	items: T[]
@@ -159,12 +162,21 @@ function createInsertObject(
 		// so it won't break anything
 		type: new GraphQLObjectType({
 			name: inflection.upperCamelCase(`${codec.name}CreatePayload`),
-			fields: { items: { type: new GraphQLList(_outputObj) } }
+			fields: {
+				items: {
+					type: new GraphQLNonNull(new GraphQLList(_outputObj)),
+					extensions: { grafast: { plan: getRowsPlan } }
+				},
+				affected: {
+					type: new GraphQLNonNull(GraphQLInt),
+					extensions: { grafast: { plan: getRowCountPlan } }
+				}
+			}
 		}),
-		extensions: { grafast: { plan } }
+		extensions: { grafast: { plan: executeInsertPlan } }
 	}
 
-	function plan(...[, args]: GrafastPlanParams) {
+	function executeInsertPlan(...[, args]: GrafastPlanParams) {
 		sideEffect(args.getRaw(['input', 'items']), items => {
 			if(!items.length) {
 				throw new Error('Must have at least 1 mutation')
@@ -175,14 +187,21 @@ function createInsertObject(
 			}
 		})
 
-		const $args = args.getRaw(['input']) as Step
+		const $args = args.getRaw('input') as Step
 		const $tx = withPgClientTransaction(executor, $args, executeAsync)
+
+		return $tx
+	}
+
+	function getRowsPlan(...[plan]: GrafastPlanParams<Step<QueryResult>>) {
 		const $items = table.find()
+		const $rowsParam = $items
+			.placeholder(lambda(plan, r => JSON.stringify(r.rows)), TYPES.jsonb, true)
 		$items.join(
 			{
 				type: 'inner',
 				from: sql`ROWS FROM (
-					jsonb_to_recordset(${$items.placeholder($tx, TYPES.jsonb, true)})
+					jsonb_to_recordset(${$rowsParam})
 					AS (${pkeyColumnsJoined})) WITH ORDINALITY`,
 				alias: sql`items`,
 				conditions: primaryKey.attributes.map(a => (
@@ -199,14 +218,14 @@ function createInsertObject(
 		})
 		$items.setOrderIsUnique()
 
-		return object({ items: $items })
+		return $items
 	}
 
 	async function executeAsync(
 		client: PgClient,
 		{ items, onConflict = 'error' }: MutationInput
-	): Promise<string> {
-		const { rows } = await insertData(
+	) {
+		const rslt = await insertData(
 			items,
 			mapToSimplePgClient(client),
 			onConflict === 'error'
@@ -221,8 +240,12 @@ function createInsertObject(
 			}
 		)
 
-		return JSON.stringify(rows)
+		return rslt
 	}
+}
+
+function getRowCountPlan(...[plan]: GrafastPlanParams<Step<QueryResult>>) {
+	return lambda(plan, r => r.rowCount || 0)
 }
 
 function mapToSimplePgClient(client: PgClient): SimplePgClient {
