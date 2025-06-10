@@ -2,6 +2,7 @@ export type PGEntityCtx<T> = {
 	tableName: string
 	propertyColumnMap: { [k in keyof T]: string }
 	idProperties: (keyof T)[]
+	uniques: { columns: (keyof T)[] }[]
 }
 
 type QueryResult = {
@@ -39,15 +40,11 @@ type ConflictHandlingOpts<T> = {
 const PG_MAX_PARAMS = 32_000
 
 /**
- * Inserts the following entities into Postgres. When there are
- * lots of entities, it'll use the COPY command to insert them. Otherwise,
- * it'll use the INSERT command.
+ * Inserts the following entities into Postgres.
  *
  * @param onConflict If specified, will update the specified
  *  columns of the entity if there is a conflict. If undefined, it'll
  *  skip the entity if there is a conflict.
- *
- * @returns number of rows affected
  */
 export async function insertData<T>(
 	entities: T[],
@@ -56,131 +53,206 @@ export async function insertData<T>(
 	returningColumns: (keyof T)[] | undefined,
 	ctx: PGEntityCtx<T>,
 ) {
-	// if(entities.length > 1_000) {
-	// 	return copyData(entities, client, onConflict, ctx)
-	// }
-
-	return _insertData(entities, client, onConflict, returningColumns, ctx)
+	// simple insert if there are no conflict handling options
+	switch (onConflict?.type) {
+	// when replacing, we want to be careful to only replace the columns
+	// that the entity has. If entity[0] has properties a, b, c
+	// and entity[1] has properties a, b, d, then we want to replace
+	// a, b, c for the first entity and a, b, d for the second entity.
+	case 'replace':
+		const buckets = Object.values(
+			bucketEntitiesByProperties(entities, ctx)
+		)
+		const rslts = await Promise.all(buckets.map(
+			(bucket) => _mergeData(bucket, client, onConflict, returningColumns, ctx)
+		))
+		return sortAndMergeResultsByBuckets(buckets, entities, rslts)
+	case 'update':
+	case 'ignore':
+		return _mergeData(entities, client, onConflict, returningColumns, ctx)
+	case undefined:
+		return _insertDataSimple(entities, client, returningColumns, ctx)
+	default:
+		throw new Error(`Unknown conflict handling type: ${onConflict}`)
+	}
 }
-
-/**
- * Uses the COPY command to copy entities to a table.
- * Ensure this is executed within a transaction -- as multiple
- * SQL commands are executed.
- *
- * COPY is way faster than INSERT for large datasets.
- * See: https://www.timescale.com/learn/testing-postgres-ingest-insert-vs-batch-insert-vs-copy
- *
- * You can benchmark yourself too
- */
-// async function copyData<T>(
-// 	entities: T[],
-// 	client: SimplePgClient,
-// 	onConflict: ConflictHandlingOpts,
-// 	ctx: PGEntityCtx
-// ) {
-// 	const { tableName, propertyColumnMap } = ctx
-// 	// To resolve conflicts, we create a tmp table
-// 	// and copy data to it first. Then we copy data
-// 	// from the tmp table to the main table.
-// 	// see: https://stackoverflow.com/questions/48019381/how-postgresql-copy-to-stdin-with-csv-do-on-conflic-do-update
-// 	const tmpTableName = `tmp_${tableName}`
-// 	await client.query(`
-// 		CREATE TEMP TABLE ${tmpTableName} (LIKE ${tableName} INCLUDING DEFAULTS)
-// 		ON COMMIT DROP;
-// 	  `)
-
-// 	const propetyColumnList = Object.entries(propertyColumnMap)
-// 	const columnListStr = propetyColumnList.map(c => `"${c[1]}"`).join(',')
-// 	// Execute COPY FROM STDIN
-// 	const query = `
-// 		COPY ${tmpTableName} (${columnListStr})
-// 		FROM STDIN
-// 		WITH (FORMAT text, DELIMITER E'\\t', DEFAULT '_D_');
-// 	`
-
-// 	const pgStream = client.query(copyFrom(query))
-// 	const stream = new Readable({ objectMode: true, read() {} })
-// 	stream.pipe(pgStream)
-
-// 	for(const [index, entity] of entities.entries()) {
-// 		const values = propetyColumnList
-// 			.map(([prop]) => mapValueForCopy(entity[prop]))
-// 		stream.push(
-// 			values.join('\t')
-// 			+ (index < entities.length - 1 ? '\n' : '')
-// 		)
-// 	}
-
-// 	stream.push(null)
-
-// 	await new Promise<void>((resolve, reject) => {
-// 		pgStream.on('finish', () => resolve())
-// 		pgStream.on('error', reject)
-// 	})
-
-// 	// finally copy data from temp table to main table
-// 	const conflictHandle
-// 		= getConflictHandlingClauseForProps(onConflict, ctx)
-// 	const rslt = await client.query(`
-// 		INSERT INTO ${tableName} (${columnListStr})
-// 		SELECT ${columnListStr} FROM ${tmpTableName}
-// 		${conflictHandle}
-// 	`)
-
-// 	// drop the temp table
-// 	await client.query(`DROP TABLE ${tmpTableName}`)
-
-// 	return rslt.rowCount
-// }
 
 /**
  * Inserts the following entities into Postgres. This is
  * safe to execute for all sizes of data. It'll automatically
  * trim to the max number of parameters allowed by Postgres.
  */
-function _insertData<T>(
+async function _mergeData<T>(
 	data: T[],
 	client: SimplePgClient,
-	onConflict: ConflictHandlingOpts<T> | undefined,
+	onConflict: ConflictHandlingOpts<T>,
+	returningColumns: (keyof T)[] | undefined,
+	ctx: PGEntityCtx<T>
+) {
+	const { tableName, propertyColumnMap, uniques } = ctx
+	const tmpTableName = getTmpTableName(tableName)
+		+ '_'
+		+ Math.random().toString(36).slice(2)
+	const propsToInsert = getUsedProperties(data, ctx)
+	const propsToUpdate = onConflict.type === 'update'
+		? onConflict.properties
+		: onConflict.type === 'replace'
+			? propsToInsert
+			: undefined
+	const columnsToInsertStr = propsToInsert
+		.map(c => `"${propertyColumnMap[c]}"`)
+	let updateStr = propsToUpdate
+		?.map(c => `"${propertyColumnMap[c]}" = i."${propertyColumnMap[c]}"`)
+		?.join(',')
+	if(!updateStr) {
+		const firstProp = propertyColumnMap[propsToInsert[0]]
+		updateStr = `${firstProp} = t."${firstProp}"`
+	}
+
+	const returningColumnsStr = returningColumns?.length
+		? `RETURNING
+				merge_action() as action,
+				${returningColumns.map(c => `t."${propertyColumnMap[c]}"`).join(',')}`
+		: ''
+	const matchClauseStr = uniques
+		.map(u => (
+			u.columns.reduce((acc, p) => {
+				const col = propertyColumnMap[p]
+				return acc + (acc ? ' AND ' : '') + `t."${col}" = i."${col}"`
+			}, '')
+		))
+		.map(c => `(${c})`)
+		.join(' OR ')
+	const mergeQuery = `WITH inserted AS (
+		INSERT INTO ${tmpTableName} (${columnsToInsertStr})
+		VALUES ???
+		RETURNING *
+	)
+	MERGE INTO ${tableName} AS t
+	USING inserted AS i
+	ON ${matchClauseStr}
+	WHEN MATCHED THEN
+		UPDATE SET ${updateStr}
+	WHEN NOT MATCHED THEN
+		INSERT (${columnsToInsertStr})
+		VALUES (${propsToInsert.map(c => `i."${propertyColumnMap[c]}"`).join(',')})
+	${returningColumnsStr}
+	`
+
+	await client.query(
+		`CREATE TEMP TABLE ${tmpTableName}
+		(LIKE ${tableName} INCLUDING DEFAULTS) ON COMMIT DROP;`
+	)
+	const rslt = await executePgParameteredQuery(
+		data,
+		propsToInsert,
+		valuePlaceholders => {
+			const placeholders = valuePlaceholders.map(p => `(${p.join(',')})`)
+			return mergeQuery.replace('???', placeholders.join(','))
+		},
+		client
+	)
+	await client.query(`DROP TABLE ${tmpTableName};`)
+
+	if(returningColumnsStr && rslt.rows.length !== data.length) {
+		throw new Error(
+			`INTERNAL(_mergeData): ${rslt.rows.length} rows `
+			+ `returned, expected ${data.length}`
+		)
+	}
+
+	return rslt
+}
+
+/**
+ * Inserts the following entities into Postgres. This is
+ * safe to execute for all sizes of data. It'll automatically
+ * trim to the max number of parameters allowed by Postgres.
+ */
+function _insertDataSimple<T>(
+	data: T[],
+	client: SimplePgClient,
 	returningColumns: (keyof T)[] | undefined,
 	ctx: PGEntityCtx<T>
 ) {
 	const { tableName, propertyColumnMap } = ctx
+	const propsToInsert = getUsedProperties(data, ctx)
+	const columnsToInsertStr = propsToInsert
+		.map(c => `"${propertyColumnMap[c]}"`)
 	const returningColumnsStr = returningColumns
 		? `RETURNING ${returningColumns.map(c => `"${propertyColumnMap[c]}"`).join(',')}`
 		: ''
-	// find all columns that need to be inserted
-	const columnsToInsert = new Set<string>()
-	for(const entity of data) {
-		for(const prop in entity) {
-			if(prop in propertyColumnMap) {
-				columnsToInsert.add(propertyColumnMap[prop])
-			}
-		}
-	}
-
-	const columnsToInsertStr = Array.from(columnsToInsert)
-		.map(c => `"${c}"`)
-		.join(',')
-
-	const conflictHandle
-		= getConflictHandlingClauseForProps(onConflict, ctx)
 	return executePgParameteredQuery(
 		data,
-		Array.from(columnsToInsert) as (keyof T)[],
+		propsToInsert,
 		valuePlaceholders => {
 			const placeholders = valuePlaceholders
 				.map(p => `(${p.join(',')})`)
 			return `
 			INSERT INTO ${tableName} (${columnsToInsertStr})
 			VALUES ${placeholders.join(',')}
-			${conflictHandle}
 			${returningColumnsStr}
 			`
 		},
 		client
 	)
+}
+
+function bucketEntitiesByProperties<T>(entities: T[], ctx: PGEntityCtx<T>) {
+	const buckets: { [key: string]: T[] } = {}
+	for(const entity of entities) {
+		const usedProperties = getUsedProperties([entity], ctx)
+		const key = usedProperties.join(',')
+		buckets[key] ||= []
+		buckets[key].push(entity)
+	}
+
+	return buckets
+}
+
+function sortAndMergeResultsByBuckets<T>(
+	buckets: T[][],
+	entities: T[],
+	results: QueryResult[]
+) {
+	let rowCount = 0
+	const rows: unknown[] = []
+	const entityToIndexMap = new Map<T, number>()
+	for(const [index, entity] of entities.entries()) {
+		entityToIndexMap.set(entity, index)
+	}
+
+	for(const [bucketIndex, bucket] of buckets.entries()) {
+		const result = results[bucketIndex]
+		rowCount += result.rowCount
+		if(!result.rows.length) {
+			continue
+		}
+
+		for(const [index, row] of result.rows.entries()) {
+			const entity = bucket[index]
+			const entityIndex = entityToIndexMap.get(entity)
+			// Ensure the row is in the same order as the original entities
+			rows[entityIndex!] = row
+		}
+	}
+
+	return { rowCount, rows }
+}
+
+function getUsedProperties<T>(
+	entities: T[], { propertyColumnMap }: PGEntityCtx<T>
+): (keyof T)[] {
+	const usedProperties = new Set<keyof T>()
+	for(const entity of entities) {
+		for(const prop in entity) {
+			if(typeof entity[prop] !== 'undefined' && propertyColumnMap[prop]) {
+				usedProperties.add(prop as keyof T)
+			}
+		}
+	}
+
+	return Array.from(usedProperties)
 }
 
 /**
@@ -372,38 +444,6 @@ function buildPgParameteredQuery<T>(
 	}
 }
 
-function getConflictHandlingClauseForProps<T>(
-	onConflict: ConflictHandlingOpts<T> | undefined,
-	{ propertyColumnMap, idProperties }: PGEntityCtx<T>
-) {
-	if(!onConflict) {
-		return ''
-	}
-
-	if(onConflict.type === 'ignore') {
-		return 'ON CONFLICT DO NOTHING'
-	}
-
-	const updateCols: string[] = []
-	const propsToUpdate = onConflict.type === 'update'
-		? onConflict.properties
-		: Object.keys(propertyColumnMap) as (keyof T)[]
-
-	for(const prop of propsToUpdate) {
-		if(idProperties.includes(prop)) {
-			continue
-		}
-
-		const col = propertyColumnMap[prop]
-		updateCols.push(`"${col}" = EXCLUDED."${col}"`)
-	}
-
-	const idCols = idProperties
-		.map(p => `"${propertyColumnMap[p]}"`)
-		.join(',')
-	return `ON CONFLICT (${idCols}) DO UPDATE SET ${updateCols}`
-}
-
 function mapValueForPg(value: unknown) {
 	if(value instanceof Date) {
 		return value.toJSON()
@@ -424,7 +464,7 @@ function mapValueForPg(value: unknown) {
 	return value
 }
 
-function mapValueForCopy(value: any) {
+function mapValueForCopy(value: unknown) {
 	if(value === null) {
 		return '\\N'
 	}
@@ -439,4 +479,10 @@ function mapValueForCopy(value: any) {
 	}
 
 	return value
+}
+
+function getTmpTableName(tableName: string) {
+	// Create an acceptable temporary table name
+	// (i.e. remove quotes, special characters, etc.)
+	return tableName.replace(/[^a-zA-Z0-9_]/g, '_').toLowerCase() + '_tmp'
 }

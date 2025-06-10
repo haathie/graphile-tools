@@ -1,7 +1,8 @@
 DROP SCHEMA IF EXISTS app CASCADE;
 CREATE SCHEMA IF NOT EXISTS app;
 -- CREATE ROLE IF "app_user" WITH NOLOGIN;
-GRANT USAGE ON SCHEMA app TO "app_user";
+GRANT USAGE, CREATE ON SCHEMA app TO "app_user";
+GRANT CONNECT, TEMPORARY ON DATABASE "im-contacts" TO "app_user";
 
 -- Create custom types first
 CREATE TYPE app.contact_type AS ENUM ('individual', 'group', 'channel', 'post');
@@ -36,7 +37,7 @@ $$ LANGUAGE plpgsql STABLE PARALLEL SAFE;
 CREATE TABLE app.contacts (
 	id VARCHAR(24) PRIMARY KEY DEFAULT app.create_object_id('cnt'),
 	org_id VARCHAR(64) NOT NULL DEFAULT current_setting('app.org_id'),
-	type app.contact_type NOT NULL,
+	type app.contact_type NOT NULL DEFAULT 'individual',
 	name VARCHAR(255),
 	platform_names VARCHAR(255)[] DEFAULT '{}',
 	created_at TIMESTAMPTZ DEFAULT NOW(),
@@ -107,7 +108,7 @@ CREATE TRIGGER handle_contact_assignment_trigger
 ALTER TABLE app.contacts ENABLE ROW LEVEL SECURITY;
 GRANT
   SELECT,
-	INSERT(type, name, platform_names, phone_number, email, assignee),
+	INSERT(name, platform_names, phone_number, email, assignee),
 	UPDATE(name, platform_names, phone_number, email, assignee),
 	DELETE
 ON app.contacts TO "app_user";

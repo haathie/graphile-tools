@@ -1,6 +1,7 @@
-import { type GraphQLFieldConfig, GraphQLInputObjectType, GraphQLList, GraphQLObjectType, type GraphQLObjectTypeConfig } from 'graphql'
+import { type GraphQLFieldConfig, GraphQLInputObjectType, GraphQLList, GraphQLNonNull, GraphQLObjectType, type GraphQLObjectTypeConfig } from 'graphql'
 import { type PgClient, type PgCodecWithAttributes, PgResource, TYPES, withPgClientTransaction } from 'postgraphile/@dataplan/pg'
 import { type FieldPlanResolver, object, sideEffect, type Step } from 'postgraphile/grafast'
+import { GraphQLEnumType } from 'postgraphile/graphql'
 import { sql } from 'postgraphile/pg-sql2'
 import { insertData, type SimplePgClient } from './pg-utils.ts'
 
@@ -11,6 +12,27 @@ type Hook = NonNullable<
 		GraphileConfig.Plugin['schema']
 	>['hooks']
 >['GraphQLSchema']
+
+type CreateMutationOpts = {
+	table: PgResource<string, PgCodecWithAttributes>
+	build: GraphileBuild.Build
+}
+
+type GrafastPlanParams = Parameters<FieldPlanResolver<any, any, any>>
+
+type MutationInput<T = any> = {
+	items: T[]
+	onConflict?: 'ignore' | 'error' | 'replace'
+}
+
+const OnConflictOptions = new GraphQLEnumType({
+	name: 'OnConflictOptions',
+	values: {
+		'DoNothing': { value: 'ignore' },
+		'Error': { value: 'error' },
+		'Replace': { value: 'replace' },
+	}
+})
 
 export const graphQLSchemaHook: Hook = (
 	config, build
@@ -32,7 +54,7 @@ export const graphQLSchemaHook: Hook = (
 		const obj = createInsertObject({ table, build })
 		if(obj) {
 			mutations[
-				inflection.upperCamelCase(`insert_${codec.name}`)
+				inflection.upperCamelCase(`create_${codec.name}`)
 			] = obj
 			delete existingFields[inflection.createField(table)]
 		}
@@ -43,15 +65,6 @@ export const graphQLSchemaHook: Hook = (
 	Object.assign(existingFields, newMutations.getFields())
 	return config
 }
-
-type CreateMutationOpts = {
-	table: PgResource<string, PgCodecWithAttributes>
-	build: GraphileBuild.Build
-}
-
-type GrafastPlanParams = Parameters<FieldPlanResolver<any, any, any>>
-
-type MutationInput<T = any> = { items: T[] }
 
 function createInsertObject(
 	{ table, build }: CreateMutationOpts
@@ -92,6 +105,12 @@ function createInsertObject(
 	)
 	const propToColumnMap: Record<string, string> = {}
 	const primaryKeyNames: string[] = []
+	const otherUniqueNames = table.uniques.map(u => {
+		return {
+			columns: u.attributes
+				.map(a => inflection.attribute({ codec, attributeName: a }))
+		}
+	})
 	for(const attributeName in codec.attributes) {
 		const propname = inflection
 			.attribute({ codec: table.codec, attributeName })
@@ -110,8 +129,8 @@ function createInsertObject(
 	}
 
 	// the individual item that'll be used for the mutation
-	const inputObj = new GraphQLInputObjectType({
-		name: inflection.upperCamelCase(`${codec.name}InsertItem`),
+	const inputObj = new GraphQLNonNull(new GraphQLInputObjectType({
+		name: inflection.upperCamelCase(`${codec.name}CreateItem`),
 		fields: Object.entries(_inputObj.getFields()).reduce(
 			(acc, [fieldName, field]) => {
 				acc[fieldName] = field
@@ -119,15 +138,18 @@ function createInsertObject(
 			},
 			{} as Record<string, any>
 		)
-	})
+	}))
 
 	return {
-		description: `Insert one or more ${inflection.pluralize(codec.name)}`,
+		description: `Create one or more ${inflection.pluralize(codec.name)}`,
 		args: {
 			'input': {
 				type: new GraphQLInputObjectType({
-					name: inflection.upperCamelCase(`${codec.name}Insert`),
-					fields: { items: { type: new GraphQLList(inputObj) } }
+					name: inflection.upperCamelCase(`${codec.name}Create`),
+					fields: {
+						onConflict: { type: OnConflictOptions },
+						items: { type: new GraphQLNonNull(new GraphQLList(inputObj)) }
+					}
 				})
 			}
 		},
@@ -136,7 +158,7 @@ function createInsertObject(
 		// Using an object, in case more fields are added in the future,
 		// so it won't break anything
 		type: new GraphQLObjectType({
-			name: inflection.upperCamelCase(`${codec.name}InsertPayload`),
+			name: inflection.upperCamelCase(`${codec.name}CreatePayload`),
 			fields: { items: { type: new GraphQLList(_outputObj) } }
 		}),
 		extensions: { grafast: { plan } }
@@ -182,17 +204,20 @@ function createInsertObject(
 
 	async function executeAsync(
 		client: PgClient,
-		{ items }: MutationInput
+		{ items, onConflict = 'error' }: MutationInput
 	): Promise<string> {
 		const { rows } = await insertData(
 			items,
 			mapToSimplePgClient(client),
-			undefined,
+			onConflict === 'error'
+				? undefined
+				: { type: onConflict },
 			primaryKeyNames,
 			{
 				tableName: fqTableName,
 				propertyColumnMap: propToColumnMap,
-				idProperties: primaryKeyNames
+				idProperties: primaryKeyNames,
+				uniques: otherUniqueNames
 			}
 		)
 
