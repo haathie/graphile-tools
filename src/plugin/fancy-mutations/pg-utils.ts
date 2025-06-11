@@ -68,13 +68,97 @@ export async function insertData<T>(
 		))
 		return sortAndMergeResultsByBuckets(buckets, entities, rslts)
 	case 'update':
-	case 'ignore':
 		return _mergeData(entities, client, onConflict, returningColumns, ctx)
+	case 'ignore':
+		return _insertDataOrDoNothing(entities, client, returningColumns, ctx)
 	case undefined:
 		return _insertDataSimple(entities, client, returningColumns, ctx)
 	default:
 		throw new Error(`Unknown conflict handling type: ${onConflict}`)
 	}
+}
+
+async function _insertDataOrDoNothing<T>(
+	data: T[],
+	client: SimplePgClient,
+	returningColumns: (keyof T)[] | undefined,
+	ctx: PGEntityCtx<T>
+) {
+	const { tableName, propertyColumnMap, uniques } = ctx
+	const tmpTableName = getTmpTableNameRand(tableName)
+	const propsToInsert = getUsedProperties(data, ctx)
+	const columnsToInsertStr = propsToInsert
+		.map(c => `"${propertyColumnMap[c]}"`)
+		.join(',')
+	const matchClauseStr = uniques
+		.map(u => (
+			u.columns.reduce((acc, p) => {
+				const col = propertyColumnMap[p]
+				return acc + (acc ? ' AND ' : '') + `t."${col}" = i."${col}"`
+			}, '')
+		))
+		.map(c => `(${c})`)
+		.join(' OR ')
+	const returningColumnsStr = returningColumns
+		?.map(c => `t."${propertyColumnMap[c]}"`).join(',')
+
+	// we'll match all possible unique constraints
+	// and get the "returning" columns of the existing entities
+	let query = `
+	WITH inserted0 AS (
+		INSERT INTO ${tmpTableName} (${columnsToInsertStr})
+		VALUES ???
+		RETURNING *
+	),
+	inserted_rn AS (
+		SELECT *, row_number() over () AS rn FROM inserted0
+	),
+	existing AS (
+		SELECT ${returningColumnsStr || '1'}, i.rn
+		FROM ${tableName} AS t
+		INNER JOIN inserted_rn AS i ON ${matchClauseStr}
+	),
+	inserts AS (
+		MERGE INTO ${tableName} AS t
+		USING inserted_rn AS i
+		ON ${matchClauseStr}
+		WHEN MATCHED THEN
+			DO NOTHING
+		WHEN NOT MATCHED THEN
+			INSERT (${columnsToInsertStr})
+			VALUES (${propsToInsert.map(c => `i."${propertyColumnMap[c]}"`).join(',')})
+		RETURNING ${returningColumnsStr || '1'}, i.rn
+	)
+	`
+	if(returningColumnsStr) {
+		query += `SELECT *, 'inserted' AS "row_action" FROM inserts
+	UNION ALL
+	SELECT *, 'existing' AS "row_action" FROM existing
+	ORDER BY rn`
+	} else {
+		query += 'SELECT COUNT(*) FROM inserts'
+	}
+
+	await client.query(
+		`CREATE TEMP TABLE ${tmpTableName}
+		(LIKE ${tableName} INCLUDING DEFAULTS) ON COMMIT DROP;`
+	)
+	const rslt = await executePgParameteredQuery(
+		data,
+		propsToInsert,
+		valuePlaceholders => {
+			const placeholders = valuePlaceholders.map(p => `(${p.join(',')})`)
+			return query.replace('???', placeholders.join(','))
+		},
+		client
+	)
+
+	if(returningColumnsStr) {
+		rslt.rowCount = rslt.rows
+			.filter((r: any) => r['row_action'] === 'inserted').length
+	}
+
+	return rslt
 }
 
 /**
@@ -90,9 +174,7 @@ async function _mergeData<T>(
 	ctx: PGEntityCtx<T>
 ) {
 	const { tableName, propertyColumnMap, uniques } = ctx
-	const tmpTableName = getTmpTableName(tableName)
-		+ '_'
-		+ Math.random().toString(36).slice(2)
+	const tmpTableName = getTmpTableNameRand(tableName)
 	const propsToInsert = getUsedProperties(data, ctx)
 	const propsToUpdate = onConflict.type === 'update'
 		? onConflict.properties
@@ -126,6 +208,7 @@ async function _mergeData<T>(
 		))
 		.map(c => `(${c})`)
 		.join(' OR ')
+
 	const mergeQuery = `WITH inserted AS (
 		INSERT INTO ${tmpTableName} (${columnsToInsertStr})
 		VALUES ???
@@ -155,19 +238,19 @@ async function _mergeData<T>(
 		},
 		client
 	)
-	await client.query(`DROP TABLE ${tmpTableName};`)
 
 	if(returningColumnsStr) {
 		if(rslt.rows.length !== data.length) {
 			throw new Error(
-				`INTERNAL(_mergeData): ${rslt.rows.length} rows `
-				+ `returned, expected ${data.length}`
+				`INTERNAL(_mergeData): ${rslt.rows.length} rows`
+				+ ` returned, expected ${data.length}`
 			)
 		}
 
 		if(onConflict.type === 'ignore') {
 			rslt.rowCount = rslt.rows
-				.filter(r => r['action'] !== 'UPDATE').length
+				.filter((r: any) => r['action'] !== 'UPDATE')
+				.length
 		}
 	}
 
@@ -489,6 +572,12 @@ function mapValueForCopy(value: unknown) {
 	}
 
 	return value
+}
+
+function getTmpTableNameRand(tableName: string) {
+	return getTmpTableName(tableName)
+		+ '_'
+		+ Math.random().toString(36).slice(2)
 }
 
 function getTmpTableName(tableName: string) {

@@ -1,6 +1,6 @@
-import { type GraphQLFieldConfig, GraphQLInputObjectType, GraphQLInt, GraphQLList, GraphQLNonNull, GraphQLObjectType, type GraphQLObjectTypeConfig } from 'graphql'
+import { type GraphQLFieldConfig, type GraphQLInputFieldConfig, GraphQLInputObjectType, type GraphQLInputObjectTypeConfig, GraphQLInt, GraphQLList, GraphQLNonNull, GraphQLObjectType, type GraphQLObjectTypeConfig } from 'graphql'
 import type { QueryResult } from 'pg'
-import { type PgClient, type PgCodecWithAttributes, PgResource, TYPES, withPgClientTransaction } from 'postgraphile/@dataplan/pg'
+import { type PgClient, type PgCodecWithAttributes, PgExecutor, PgResource, TYPES, withPgClientTransaction } from 'postgraphile/@dataplan/pg'
 import { type FieldPlanResolver, lambda, sideEffect, type Step } from 'postgraphile/grafast'
 import { GraphQLEnumType } from 'postgraphile/graphql'
 import { sql } from 'postgraphile/pg-sql2'
@@ -123,24 +123,16 @@ function createInsertObject(
 		}
 	}
 
-	const _inputObj = build
-		.getGraphQLTypeByPgCodec(codec, 'input') as GraphQLObjectType
 	const _outputObj = build
 		.getGraphQLTypeByPgCodec(codec, 'output') as GraphQLObjectType
-	if(!_inputObj || !_outputObj) {
+	if(!_outputObj) {
 		return
 	}
 
 	// the individual item that'll be used for the mutation
 	const inputObj = new GraphQLNonNull(new GraphQLInputObjectType({
 		name: inflection.upperCamelCase(`${codec.name}CreateItem`),
-		fields: Object.entries(_inputObj.getFields()).reduce(
-			(acc, [fieldName, field]) => {
-				acc[fieldName] = field
-				return acc
-			},
-			{} as Record<string, any>
-		)
+		fields: getFieldsForInsert(table, build)
 	}))
 
 	return {
@@ -156,10 +148,6 @@ function createInsertObject(
 				})
 			}
 		},
-		// we'll just return an object containing all the inserted
-		// items, i.e. { items: T[] }
-		// Using an object, in case more fields are added in the future,
-		// so it won't break anything
 		type: new GraphQLObjectType({
 			name: inflection.upperCamelCase(`${codec.name}CreatePayload`),
 			fields: {
@@ -228,9 +216,7 @@ function createInsertObject(
 		const rslt = await insertData(
 			items,
 			mapToSimplePgClient(client),
-			onConflict === 'error'
-				? undefined
-				: { type: onConflict },
+			onConflict === 'error' ? undefined : { type: onConflict },
 			primaryKeyNames,
 			{
 				tableName: fqTableName,
@@ -242,6 +228,183 @@ function createInsertObject(
 
 		return rslt
 	}
+}
+
+function normaliseItemRelations(
+	items: unknown[],
+	root: PgResource<string, PgCodecWithAttributes>,
+	build: GraphileBuild.Build,
+	relationName?: string
+) {
+	type ItemWithResource = {
+		item: unknown
+		relationName?: string
+		dependents: ItemWithResource[]
+	}
+
+	const normalised: ItemWithResource[] = []
+	const relationNames = Object.entries(root.getRelations())
+	const relationNameFieldMap = relationNames.reduce(
+		(acc, [name, value]) => {
+			const fieldName = getRelationFieldName(name, root, build)
+			acc[fieldName] = {
+				name,
+				table: value.remoteResource,
+				isReferencee: value.isReferencee,
+			}
+			return acc
+		},
+		{} as Record<string, { name: string, table: PgResource<string, PgCodecWithAttributes> }>
+	)
+	for(const item of items) {
+		if(typeof item !== 'object' || !item) {
+			continue
+		}
+
+		const itemWResource: ItemWithResource = {
+			item,
+			relationName,
+			dependents: []
+		}
+
+		if(!relationNames.length) {
+			normalised.push(itemWResource)
+			continue
+		}
+
+		for(const [key, value] of Object.entries(item)) {
+			const relInfo = relationNameFieldMap[key]
+			if(!relInfo || !value || typeof value !== 'object') {
+				continue
+			}
+
+			itemWResource.dependents = normaliseItemRelations(
+				Array.isArray(value) ? value : [value],
+				relInfo.table,
+				build,
+				relInfo.name
+			)
+
+			// @ts-expect-error
+			delete item[key]
+		}
+
+		normalised.push(itemWResource)
+	}
+
+	return normalised
+}
+
+function getFieldsForInsert(
+	table: PgResource<string, PgCodecWithAttributes>,
+	build: GraphileBuild.Build
+) {
+	const { inflection } = build
+	return buildFieldsWithRelations(
+		table,
+		build,
+		(table, relationPath, resource) => {
+			const inputItemName = inflection.upperCamelCase(
+				`${relationPath.join('_')}_CreateItem`
+			)
+			const _inputObj = build.getGraphQLTypeByPgCodec(
+				resource.codec, 'input'
+			) as GraphQLInputObjectType
+			return {
+				name: inputItemName,
+				fields: { ..._inputObj.getFields() },
+			}
+		}
+	)
+}
+
+function buildFieldsWithRelations(
+	table: PgResource<string, PgCodecWithAttributes>,
+	build: GraphileBuild.Build,
+	getInputObject: (
+		path: PgResource<string, PgCodecWithAttributes>,
+		relationPath: string[],
+		resource: PgResource
+	) => GraphQLInputObjectTypeConfig,
+	path: string[] = []
+) {
+	const { inflection, pgTableResource } = build
+	const obj = getInputObject(table, [], table)
+	const fields = obj.fields as { [_: string]: GraphQLInputFieldConfig }
+
+	for(const [
+		relationName, relation
+	] of Object.entries(table.getRelations())) {
+		const {
+			remoteResource, isUnique, isReferencee, remoteAttributes,
+			localAttributes
+		} = relation
+		const relationCodec = remoteResource.codec as PgCodecWithAttributes
+		const relationTable = pgTableResource(relationCodec)
+		if(!relationTable) {
+			continue
+		}
+
+		// avoid circular references, check either we've traversed this relation
+		// or its inverse relation
+		if(path.some(r => r === relationName || relationTable.getRelation(r))) {
+			continue
+		}
+
+		const isMulti = !isUnique
+		const relName = getRelationFieldName(relationName, table, build)
+		const newPath = [...path, relationName]
+		const inputObjConfig = getInputObject(table, newPath, remoteResource)
+		inputObjConfig.fields = buildFieldsWithRelations(
+			relationTable, build, getInputObject, newPath
+		)
+
+		// we'll remove the relation field from the input object if required
+		if(isReferencee && Array.isArray(remoteAttributes)) {
+			for(const column of remoteAttributes) {
+				const attrName = inflection
+					.attribute({ codec: relationCodec, attributeName: column })
+				delete inputObjConfig.fields[attrName]
+			}
+		}
+
+		// also make all columns in the input object optional
+		for(const column of localAttributes || []) {
+			const attrName = inflection
+				.attribute({ codec: table.codec, attributeName: column })
+			const field = fields[attrName]
+			if(!field) {
+				continue
+			}
+
+			if(field.type instanceof GraphQLNonNull) {
+				fields[attrName] = { ...field, type: field.type.ofType }
+			}
+		}
+
+		const inputObj = new GraphQLInputObjectType(inputObjConfig)
+		fields[relName] = {
+			type: isMulti ? new GraphQLList(new GraphQLNonNull(inputObj)) : inputObj,
+		}
+		// console.log(table.name, ':', relationName, '=>', relName, relation)
+	}
+
+	return fields
+}
+
+function getRelationFieldName(
+	relationName: string,
+	table: PgResource<string, PgCodecWithAttributes>,
+	{ inflection }: GraphileBuild.Build,
+) {
+	const { isUnique } = table.getRelation(relationName)
+	const isMulti = !isUnique
+	const relNameFn = isMulti ? 'manyRelationConnection' : 'singleRelation'
+	return inflection[relNameFn]({
+		codec: table.codec,
+		relationName,
+		registry: table.registry
+	})
 }
 
 function getRowCountPlan(...[plan]: GrafastPlanParams<Step<QueryResult>>) {
