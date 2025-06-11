@@ -1,6 +1,6 @@
 import { type GraphQLFieldConfig, type GraphQLInputFieldConfig, GraphQLInputObjectType, type GraphQLInputObjectTypeConfig, GraphQLInt, GraphQLList, GraphQLNonNull, GraphQLObjectType, type GraphQLObjectTypeConfig } from 'graphql'
 import type { QueryResult } from 'pg'
-import { type PgClient, type PgCodecWithAttributes, PgExecutor, PgResource, TYPES, withPgClientTransaction } from 'postgraphile/@dataplan/pg'
+import { type PgClient, type PgCodecWithAttributes, PgResource, TYPES, withPgClientTransaction } from 'postgraphile/@dataplan/pg'
 import { type FieldPlanResolver, lambda, sideEffect, type Step } from 'postgraphile/grafast'
 import { GraphQLEnumType } from 'postgraphile/graphql'
 import { sql } from 'postgraphile/pg-sql2'
@@ -58,7 +58,7 @@ export const graphQLSchemaHook: Hook = (
 		const obj = createInsertObject({ table, build })
 		if(obj) {
 			mutations[
-				inflection.upperCamelCase(`create_${codec.name}`)
+				inflection.camelCase(inflection.pluralize(`create_${codec.name}`))
 			] = obj
 			delete existingFields[inflection.createField(table)]
 		}
@@ -93,14 +93,6 @@ function createInsertObject(
 		return
 	}
 
-	// table ID is the executor name + '.' + table name
-	// so we remove the executor name from the identifier
-	// to get the fully qualified table name
-	// e.g. 'main.public.users' -> 'public.users'
-	const fqTableName = table.identifier.slice(
-		executor.name.length + 1
-	)
-
 	const pkeyColumnsJoined = sql.join(
 		primaryKey.attributes.map(a => (
 			sql`${sql.identifier(a)} ${codec.attributes[a].codec.sqlType}`
@@ -109,12 +101,7 @@ function createInsertObject(
 	)
 	const propToColumnMap: Record<string, string> = {}
 	const primaryKeyNames: string[] = []
-	const otherUniqueNames = table.uniques.map(u => {
-		return {
-			columns: u.attributes
-				.map(a => inflection.attribute({ codec, attributeName: a }))
-		}
-	})
+
 	for(const attributeName in codec.attributes) {
 		const propname = inflection
 			.attribute({ codec: table.codec, attributeName })

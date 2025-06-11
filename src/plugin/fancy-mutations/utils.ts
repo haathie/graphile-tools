@@ -3,8 +3,10 @@ import type { PGEntityCtx } from './pg-utils.ts'
 
 type _PgResource = PgResource<string, PgCodecWithAttributes>
 
+type Item = { [_: string]: unknown }
+
 type ItemNode = {
-	item: unknown
+	item: Item
 	resource: string
 	dependencies: { [relation: string]: ItemNode }
 }
@@ -16,23 +18,23 @@ type RelInfo = {
 	isReferencee: boolean
 }
 
-type ExecuteNestedMutationsOpts = {
-	items: unknown[]
+type ExecuteNestedMutationsOpts<T> = {
+	items: T[]
 	root: _PgResource
 	build: GraphileBuild.Build
 	mutate(
-		items: unknown[],
+		items: T[],
 		resource: _PgResource,
-		ctx: PGEntityCtx<{ [_: string]: unknown }>
+		ctx: PGEntityCtx<T>
 	): Promise<unknown[]>
 }
 
-export async function executeNestedMutations({
+export async function executeNestedMutations<T extends { [k: string]: unknown }>({
 	items,
 	root,
 	build,
 	mutate
-}: ExecuteNestedMutationsOpts) {
+}: ExecuteNestedMutationsOpts<T>) {
 	const { inflection } = build
 	let normalised = buildItemRelationGraph(items, root, build)
 	if(!normalised.length) {
@@ -40,12 +42,12 @@ export async function executeNestedMutations({
 	}
 
 	// map of items to be mutated => post mutation
-	const resolvedMap = new Map<unknown, unknown>()
+	const resolvedMap = new Map<T, unknown>()
 
 	// we'll go through all items, mutate all that don't have dependencies,
 	// remove them from the list, and then repeat until there are no items left
 	while(normalised.length) {
-		const toMutate: { [resource: string]: unknown[] } = {}
+		const toMutate: { [resource: string]: T[] } = {}
 		let hasMutations = false
 		normalised = normalised.filter((node) => {
 			if(Object.keys(node.dependencies).length) {
@@ -53,7 +55,7 @@ export async function executeNestedMutations({
 			}
 
 			toMutate[node.resource] ??= []
-			toMutate[node.resource].push(node.item)
+			toMutate[node.resource].push(node.item as T)
 			hasMutations = true
 			return false
 		})
@@ -85,12 +87,12 @@ export async function executeNestedMutations({
 
 		for(const node of normalised) {
 			for(const [relationName, dependency] of Object.entries(node.dependencies)) {
-				const mutatedItem = resolvedMap.get(dependency.item)
+				const mutatedItem = resolvedMap.get(dependency.item as T)
 				if(!mutatedItem) {
 					continue // dependency not resolved yet
 				}
 
-				const resource = root.registry.pgResources[node.resource]
+				const resource = root.registry.pgResources[node.resource] as _PgResource
 				const relation = resource
 					.getRelation(relationName)
 				const fieldName = getRelationFieldName(relationName, resource, build)
@@ -100,7 +102,10 @@ export async function executeNestedMutations({
 						codec: resource.codec,
 						attributeName: attr
 					})
-					node.item[fieldName] = mutatedItem[relation.remoteAttributes[i]]
+
+					// @ts-ignore
+					const mutatedField = mutatedItem[relation.remoteAttributes[i]]
+					node.item[fieldName] = mutatedField
 				}
 
 				delete node.dependencies[relationName]
@@ -151,7 +156,7 @@ function buildItemRelationGraph(
 		}
 
 		const node: ItemNode = {
-			item,
+			item: item as Item,
 			resource: root.name,
 			dependencies: { ...dependencies }
 		}
@@ -197,10 +202,10 @@ function buildItemRelationGraph(
 	return normalised
 }
 
-function getEntityCtx(
+function getEntityCtx<T>(
 	table: _PgResource,
 	inflection: GraphileBuild.Build['inflection'],
-): PGEntityCtx<{ [_: string]: unknown }> {
+): PGEntityCtx<T> {
 	const { identifier, executor, codec } = table
 	// table ID is the executor name + '.' + table name
 	// so we remove the executor name from the identifier
@@ -217,8 +222,9 @@ function getEntityCtx(
 
 	const otherUniqueNames = table.uniques.map(u => {
 		return {
-			columns: u.attributes
-				.map(a => inflection.attribute({ codec, attributeName: a }))
+			columns: u.attributes.map(a => (
+				inflection.attribute({ codec, attributeName: a }) as keyof T
+			))
 		}
 	})
 	for(const attributeName in codec.attributes) {
@@ -232,9 +238,9 @@ function getEntityCtx(
 
 	return {
 		tableName: fqTableName,
-		idProperties: primaryKeyNames,
+		idProperties: primaryKeyNames as Array<keyof T>,
 		uniques: otherUniqueNames,
-		propertyColumnMap: propToColumnMap
+		propertyColumnMap: propToColumnMap as Record<keyof T, string>,
 	}
 }
 
