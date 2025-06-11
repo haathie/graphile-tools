@@ -70,95 +70,13 @@ export async function insertData<T>(
 	case 'update':
 		return _mergeData(entities, client, onConflict, returningColumns, ctx)
 	case 'ignore':
-		return _insertDataOrDoNothing(entities, client, returningColumns, ctx)
 	case undefined:
-		return _insertDataSimple(entities, client, returningColumns, ctx)
+		return _insertDataSimple(
+			entities, client, returningColumns, onConflict?.type === 'ignore', ctx
+		)
 	default:
 		throw new Error(`Unknown conflict handling type: ${onConflict}`)
 	}
-}
-
-async function _insertDataOrDoNothing<T>(
-	data: T[],
-	client: SimplePgClient,
-	returningColumns: (keyof T)[] | undefined,
-	ctx: PGEntityCtx<T>
-) {
-	const { tableName, propertyColumnMap, uniques } = ctx
-	const tmpTableName = getTmpTableNameRand(tableName)
-	const propsToInsert = getUsedProperties(data, ctx)
-	const columnsToInsertStr = propsToInsert
-		.map(c => `"${propertyColumnMap[c]}"`)
-		.join(',')
-	const matchClauseStr = uniques
-		.map(u => (
-			u.columns.reduce((acc, p) => {
-				const col = propertyColumnMap[p]
-				return acc + (acc ? ' AND ' : '') + `t."${col}" = i."${col}"`
-			}, '')
-		))
-		.map(c => `(${c})`)
-		.join(' OR ')
-	const returningColumnsStr = returningColumns
-		?.map(c => `t."${propertyColumnMap[c]}"`).join(',')
-
-	// we'll match all possible unique constraints
-	// and get the "returning" columns of the existing entities
-	let query = `
-	WITH inserted0 AS (
-		INSERT INTO ${tmpTableName} (${columnsToInsertStr})
-		VALUES ???
-		RETURNING *
-	),
-	inserted_rn AS (
-		SELECT *, row_number() over () AS rn FROM inserted0
-	),
-	existing AS (
-		SELECT ${returningColumnsStr || '1'}, i.rn
-		FROM ${tableName} AS t
-		INNER JOIN inserted_rn AS i ON ${matchClauseStr}
-	),
-	inserts AS (
-		MERGE INTO ${tableName} AS t
-		USING inserted_rn AS i
-		ON ${matchClauseStr}
-		WHEN MATCHED THEN
-			DO NOTHING
-		WHEN NOT MATCHED THEN
-			INSERT (${columnsToInsertStr})
-			VALUES (${propsToInsert.map(c => `i."${propertyColumnMap[c]}"`).join(',')})
-		RETURNING ${returningColumnsStr || '1'}, i.rn
-	)
-	`
-	if(returningColumnsStr) {
-		query += `SELECT *, 'inserted' AS "row_action" FROM inserts
-	UNION ALL
-	SELECT *, 'existing' AS "row_action" FROM existing
-	ORDER BY rn`
-	} else {
-		query += 'SELECT COUNT(*) FROM inserts'
-	}
-
-	await client.query(
-		`CREATE TEMP TABLE ${tmpTableName}
-		(LIKE ${tableName} INCLUDING DEFAULTS) ON COMMIT DROP;`
-	)
-	const rslt = await executePgParameteredQuery(
-		data,
-		propsToInsert,
-		valuePlaceholders => {
-			const placeholders = valuePlaceholders.map(p => `(${p.join(',')})`)
-			return query.replace('???', placeholders.join(','))
-		},
-		client
-	)
-
-	if(returningColumnsStr) {
-		rslt.rowCount = rslt.rows
-			.filter((r: any) => r['row_action'] === 'inserted').length
-	}
-
-	return rslt
 }
 
 /**
@@ -178,25 +96,15 @@ async function _mergeData<T>(
 	const propsToInsert = getUsedProperties(data, ctx)
 	const propsToUpdate = onConflict.type === 'update'
 		? onConflict.properties
-		: onConflict.type === 'replace'
-			? propsToInsert
-			: undefined
+		: propsToInsert
 	const columnsToInsertStr = propsToInsert
 		.map(c => `"${propertyColumnMap[c]}"`)
-	let updateStr = propsToUpdate
-		?.map(c => `"${propertyColumnMap[c]}" = i."${propertyColumnMap[c]}"`)
-		?.join(',')
-	// we use an update string that basically does nothing to handle
-	// onConflict.type === 'ignore', so we get the properties of the existing
-	// entity back in the result.
-	if(!updateStr) {
-		const firstProp = propertyColumnMap[propsToInsert[0]]
-		updateStr = `${firstProp} = t."${firstProp}"`
-	}
+	const updateStr = propsToUpdate
+		.map(c => `"${propertyColumnMap[c]}" = i."${propertyColumnMap[c]}"`)
+		.join(',')
 
 	const returningColumnsStr = returningColumns?.length
 		? `RETURNING
-				merge_action() as action,
 				${returningColumns.map(c => `t."${propertyColumnMap[c]}"`).join(',')}`
 		: ''
 	const matchClauseStr = uniques
@@ -209,21 +117,31 @@ async function _mergeData<T>(
 		.map(c => `(${c})`)
 		.join(' OR ')
 
-	const mergeQuery = `WITH inserted AS (
+	let query = `WITH items AS (
 		INSERT INTO ${tmpTableName} (${columnsToInsertStr})
 		VALUES ???
 		RETURNING *
+	),
+	updated AS (
+		UPDATE ${tableName} AS t
+		SET ${updateStr}
+		FROM items AS i
+		WHERE ${matchClauseStr}
+		${returningColumnsStr}
+	),
+	inserted AS (
+		INSERT INTO ${tableName} AS t (${columnsToInsertStr})
+		SELECT ${columnsToInsertStr}
+		FROM items AS i
+		ON CONFLICT DO NOTHING
+		${returningColumnsStr}
 	)
-	MERGE INTO ${tableName} AS t
-	USING inserted AS i
-	ON ${matchClauseStr}
-	WHEN MATCHED THEN
-		UPDATE SET ${updateStr}
-	WHEN NOT MATCHED THEN
-		INSERT (${columnsToInsertStr})
-		VALUES (${propsToInsert.map(c => `i."${propertyColumnMap[c]}"`).join(',')})
-	${returningColumnsStr}
 	`
+	if(returningColumnsStr) {
+		query += `SELECT *, 'UPDATE' AS "row_action" FROM updated
+		UNION ALL
+		SELECT *, 'INSERT' AS "row_action" FROM inserted`
+	}
 
 	await client.query(
 		`CREATE TEMP TABLE ${tmpTableName}
@@ -234,25 +152,10 @@ async function _mergeData<T>(
 		propsToInsert,
 		valuePlaceholders => {
 			const placeholders = valuePlaceholders.map(p => `(${p.join(',')})`)
-			return mergeQuery.replace('???', placeholders.join(','))
+			return query.replace('???', placeholders.join(','))
 		},
 		client
 	)
-
-	if(returningColumnsStr) {
-		if(rslt.rows.length !== data.length) {
-			throw new Error(
-				`INTERNAL(_mergeData): ${rslt.rows.length} rows`
-				+ ` returned, expected ${data.length}`
-			)
-		}
-
-		if(onConflict.type === 'ignore') {
-			rslt.rowCount = rslt.rows
-				.filter((r: any) => r['action'] !== 'UPDATE')
-				.length
-		}
-	}
 
 	return rslt
 }
@@ -266,7 +169,8 @@ function _insertDataSimple<T>(
 	data: T[],
 	client: SimplePgClient,
 	returningColumns: (keyof T)[] | undefined,
-	ctx: PGEntityCtx<T>
+	ignoreErrors: boolean,
+	ctx: PGEntityCtx<T>,
 ) {
 	const { tableName, propertyColumnMap } = ctx
 	const propsToInsert = getUsedProperties(data, ctx)
@@ -284,6 +188,7 @@ function _insertDataSimple<T>(
 			return `
 			INSERT INTO ${tableName} (${columnsToInsertStr})
 			VALUES ${placeholders.join(',')}
+			${ignoreErrors ? 'ON CONFLICT DO NOTHING' : ''}
 			${returningColumnsStr}
 			`
 		},
