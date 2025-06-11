@@ -5,6 +5,7 @@ import { type FieldPlanResolver, lambda, sideEffect, type Step } from 'postgraph
 import { GraphQLEnumType } from 'postgraphile/graphql'
 import { sql } from 'postgraphile/pg-sql2'
 import { insertData, type SimplePgClient } from './pg-utils.ts'
+import { executeNestedMutations } from './utils.ts'
 
 const MAX_BULK_MUTATION_LENGTH = 100
 
@@ -213,86 +214,28 @@ function createInsertObject(
 		client: PgClient,
 		{ items, onConflict = 'error' }: MutationInput
 	) {
-		const rslt = await insertData(
+		const rslt = await executeNestedMutations({
 			items,
-			mapToSimplePgClient(client),
-			onConflict === 'error' ? undefined : { type: onConflict },
-			primaryKeyNames,
-			{
-				tableName: fqTableName,
-				propertyColumnMap: propToColumnMap,
-				idProperties: primaryKeyNames,
-				uniques: otherUniqueNames
-			}
-		)
+			root: table,
+			build,
+			async mutate(items, resource, ctx) {
+				let _onConflict = onConflict
+				if(_onConflict === 'replace' && !resource.extensions?.canUpdate) {
+					_onConflict = 'ignore'
+				}
 
+				const rslt = await insertData(
+					items,
+					mapToSimplePgClient(client),
+					_onConflict === 'error' ? undefined : { type: _onConflict },
+					ctx.idProperties,
+					ctx
+				)
+				return rslt.rows
+			},
+		})
 		return rslt
 	}
-}
-
-function normaliseItemRelations(
-	items: unknown[],
-	root: PgResource<string, PgCodecWithAttributes>,
-	build: GraphileBuild.Build,
-	relationName?: string
-) {
-	type ItemWithResource = {
-		item: unknown
-		relationName?: string
-		dependents: ItemWithResource[]
-	}
-
-	const normalised: ItemWithResource[] = []
-	const relationNames = Object.entries(root.getRelations())
-	const relationNameFieldMap = relationNames.reduce(
-		(acc, [name, value]) => {
-			const fieldName = getRelationFieldName(name, root, build)
-			acc[fieldName] = {
-				name,
-				table: value.remoteResource,
-				isReferencee: value.isReferencee,
-			}
-			return acc
-		},
-		{} as Record<string, { name: string, table: PgResource<string, PgCodecWithAttributes> }>
-	)
-	for(const item of items) {
-		if(typeof item !== 'object' || !item) {
-			continue
-		}
-
-		const itemWResource: ItemWithResource = {
-			item,
-			relationName,
-			dependents: []
-		}
-
-		if(!relationNames.length) {
-			normalised.push(itemWResource)
-			continue
-		}
-
-		for(const [key, value] of Object.entries(item)) {
-			const relInfo = relationNameFieldMap[key]
-			if(!relInfo || !value || typeof value !== 'object') {
-				continue
-			}
-
-			itemWResource.dependents = normaliseItemRelations(
-				Array.isArray(value) ? value : [value],
-				relInfo.table,
-				build,
-				relInfo.name
-			)
-
-			// @ts-expect-error
-			delete item[key]
-		}
-
-		normalised.push(itemWResource)
-	}
-
-	return normalised
 }
 
 function getFieldsForInsert(
