@@ -16,7 +16,7 @@
     "@graphile/simplify-inflection": "^8.0.0-beta.6",
     "express": "^5.1.0",
     "pg": "^8.6.0",
-    "postgraphile": "^5.0.0-beta.40"
+    "postgraphile": "^5.0.0-beta.41"
   },
   "devDependencies": {
     "@adiwajshing/eslint-config": "git+https://github.com/adiwajshing/eslint-config",
