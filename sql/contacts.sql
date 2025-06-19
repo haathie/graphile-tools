@@ -84,7 +84,10 @@ BEGIN
 		NEW.assigned_by := app.current_actor_id();
 		NEW.first_assigned_at := clock_timestamp();
 	-- On UPDATE: if assignee is being changed
-	ELSIF TG_OP = 'UPDATE' AND NEW.assignee IS NOT NULL AND NEW.assignee <> OLD.assignee THEN
+	ELSIF TG_OP = 'UPDATE'
+		AND NEW.assignee IS NOT NULL
+		AND NEW.assignee IS DISTINCT FROM OLD.assignee
+	THEN
 		NEW.assigned_at := clock_timestamp();
 		NEW.assigned_by := app.current_actor_id();
 		-- Set first_assigned_at only if it's currently NULL

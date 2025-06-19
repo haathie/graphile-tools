@@ -14,7 +14,7 @@ const preset: GraphileConfig.Preset = {
 		PgSimplifyInflectionPreset
 	],
 	plugins: [
-		// ReasonableLimitsPlugin,
+		ReasonableLimitsPlugin,
 		FancyMutationsPlugin
 	],
 	disablePlugins: ['NodePlugin'],

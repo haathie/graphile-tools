@@ -3,7 +3,6 @@ import { sql } from 'postgraphile/pg-sql2'
 
 /**
  * @typedef {import('postgraphile/pg-sql2').SQL} SQL
- * @typedef {(whereMatch: SQL, resourceFrom: SQL) => SQL} ModificationFunction
  */
 
 /**
@@ -12,10 +11,13 @@ import { sql } from 'postgraphile/pg-sql2'
 export class PgSelectAndModify extends PgSelectStep {
 
 	/**
-	 * The function that will be used to perform the modification.
-	 * @type {ModificationFunction}
+	 * @type {'delete' | 'update'}
 	 */
-	modification
+	#modificationType
+	/**
+	 * @type {Record<string, SQL>}
+	 */
+	#attrsToSet = {}
 	/**
 	 * @param {import('postgraphile/@dataplan/pg').PgSelectOptions} opts
 	 */
@@ -24,36 +26,10 @@ export class PgSelectAndModify extends PgSelectStep {
 	}
 
 	execute(...args) {
-		if(!this.modification) {
+		if(!this.#modificationType) {
 			return super.execute(...args)
 		}
 
-		const primaryUnique = this.resource.uniques.find(u => u.isPrimary)
-		if(!primaryUnique) {
-			throw new Error(`Cannot delete from ${this.resource.name} without a primary key`)
-		}
-
-		// ensure primary key attributes are selected -- as they'll be
-		// used to identify the rows to modify
-		const primaryUqIdxs = primaryUnique.attributes.map(attr => (
-			[
-				attr,
-				this.selectAndReturnIndex(
-					sql.join([this.alias, sql.identifier(attr)], '.')
-				)
-			]
-		))
-		const resourceFrom = this.resource.from
-		const selectionsId = sql.identifier('selections')
-		const whereMatch = sql.join(
-			primaryUqIdxs.map(([attr, idx]) => (
-				sql`${selectionsId}.${sql.identifier(idx.toString())} = t.${sql.identifier(attr)}`)
-			),
-			' AND '
-		)
-
-		const modSql = this.modification(whereMatch, resourceFrom)
-		const { text: modTxt } = sql.compile(modSql)
 		const ogExecuteWithout = this.resource['executeWithoutCache']
 		this.resource['executeWithoutCache'] = (ctx, args) => {
 			args.text = args.text.trim()
@@ -61,11 +37,7 @@ export class PgSelectAndModify extends PgSelectStep {
 				args.text = args.text.slice(0, -1)
 			}
 
-			args.text = `
-				WITH selections AS (${args.text}),
-				modifications AS (${modTxt})
-				SELECT * FROM selections
-				`
+			args.text = this.#buildModifiedSql(args.text, args.rawSqlValues)
 
 			return ogExecuteWithout.call(this.resource, ctx, args).finally(() => (
 				this.resource['executeWithoutCache'] = ogExecuteWithout
@@ -73,5 +45,106 @@ export class PgSelectAndModify extends PgSelectStep {
 		}
 
 		return super.execute(...args)
+	}
+
+	/**
+	 * @param {string} text
+	 * @param {any[]} params
+	 */
+	#buildModifiedSql(text, params) {
+		const resourceFrom = this.resource.from
+		const compiledFrom = sql.compile(resourceFrom).text
+		const primaryUnique = this.resource.uniques.find(u => u.isPrimary)
+		if(!primaryUnique) {
+			throw new Error(
+				`Cannot delete/update from ${this.resource.name} without a primary key`
+			)
+		}
+
+		if(this.#modificationType === 'delete') {
+			// ensure primary key attributes are selected -- as they'll be
+			// used to identify the rows to modify
+			const primaryUqIdxs = primaryUnique.attributes.map(attr => (
+				[
+					attr,
+					this.selectAndReturnIndex(
+						sql.join([this.alias, sql.identifier(attr)], '.')
+					)
+				]
+			))
+			const whereMatch = primaryUqIdxs.map(([attr, idx]) => (
+				`selections."${idx}" = t."${attr}"`
+			)).join(' AND ')
+			return `
+				WITH selections AS (${text}),
+				modifications AS (
+					DELETE FROM ${compiledFrom} AS t
+					INNER JOIN selections ON ${whereMatch}
+				)
+				SELECT * FROM selections
+				`
+		}
+
+		const attrsEntries = Object.entries(this.#attrsToSet)
+		const updates = attrsEntries
+			.map(([name, value]) => {
+				params.push(value)
+				return `"${name}" = $${params.length}`
+			})
+			.join(', ')
+
+		const compiledAlias = sql.compile(this.alias).text
+		const whereIdx = text.indexOf('where ')
+		const selectionsTxt = `SELECT * FROM ${compiledFrom} AS ${compiledAlias}
+		${whereIdx > 0 ? text.slice(whereIdx) : ''}
+		`
+		const whereMatch = primaryUnique.attributes
+			.map(attr => `t."${attr}" = selections."${attr}"`)
+			.join(' AND ')
+
+		const finalSelect = text
+			.slice(0, whereIdx > 0 ? whereIdx : text.length)
+			.replace(`from ${compiledFrom}`, 'from updated')
+
+		const txt = `
+		WITH selections AS (
+			${selectionsTxt}
+		),
+		updated AS (
+			UPDATE ${compiledFrom} AS t
+			SET ${updates}
+			FROM selections
+			WHERE ${whereMatch}
+			RETURNING t.*
+		)
+		${finalSelect}
+		`
+
+		return txt
+	}
+
+	delete() {
+		if(this.#modificationType === 'update') {
+			throw new Error('Cannot delete on an update operation')
+		}
+
+		this.#modificationType = 'delete'
+	}
+
+	update() {
+		if(this.#modificationType === 'delete') {
+			throw new Error('Cannot update on a delete operation')
+		}
+
+		this.#modificationType = 'update'
+	}
+
+	/**
+	 * @param {string} name
+	 * @param {import('postgraphile/grafast').Step} value
+	 */
+	set(name, value) {
+		this.update()
+		this.#attrsToSet[name] = value
 	}
 }

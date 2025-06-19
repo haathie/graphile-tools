@@ -1,7 +1,8 @@
 import { GraphQLObjectType, type GraphQLObjectTypeConfig } from 'graphql'
 import { type PgCodecWithAttributes } from 'postgraphile/@dataplan/pg'
-import { createInsertObject } from './createInsertObject.ts'
 import { createDeleteObject } from './createDeleteObject.ts'
+import { createInsertObject } from './createInsertObject.ts'
+import { createUpdateObject } from './createUpdateObject.ts'
 
 type Hook = NonNullable<
 	NonNullable<
@@ -42,7 +43,20 @@ export const graphQLSchemaHook: Hook = (
 			for(const unique of table.uniques) {
 				const deleteFieldName = inflection
 					.deleteByKeysField({ resource: table, unique })
-				console.log('deleteFieldName', deleteFieldName)
+				delete existingFields[deleteFieldName]
+			}
+		}
+
+		const updateObj = createUpdateObject({ table, build })
+		if(updateObj) {
+			const updateFieldName = inflection
+				.camelCase(inflection.pluralize(`update_${codec.name}`))
+			console.log('updateObj', updateObj)
+			mutations[updateFieldName] = updateObj
+			for(const unique of table.uniques) {
+				const fieldName = inflection
+					.updateByKeysField({ resource: table, unique })
+				console.log('updateFieldName', fieldName)
 				// delete existingFields[deleteFieldName]
 			}
 		}
