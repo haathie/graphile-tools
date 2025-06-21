@@ -55,6 +55,7 @@ CREATE TABLE app.contacts (
 	UNIQUE (org_id, phone_number),
 	UNIQUE (org_id, email)
 );
+ALTER TABLE app.contacts REPLICA IDENTITY FULL;
 
 -- remove unnecessary constraints & info to be exposed on the graphQL API
 comment on table app.contacts is $$

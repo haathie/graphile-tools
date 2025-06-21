@@ -2,11 +2,13 @@
 import { PgSimplifyInflectionPreset } from '@graphile/simplify-inflection'
 // Use the 'pg' module to connect to the database
 import { makePgService } from 'postgraphile/adaptors/pg'
+import { SubscriptionPlugin } from 'postgraphile/graphile-build'
 // The standard base preset to use, includes the main PostGraphile features
 import { PostGraphileAmberPreset } from 'postgraphile/presets/amber'
 import 'postgraphile'
 import { FancyMutationsPlugin } from './plugin/fancy-mutations/index.ts'
 import { ReasonableLimitsPlugin } from './plugin/reasonable-limits.ts'
+import { SubscriptionsPlugin } from './plugin/subscriptions/index.ts'
 
 const preset: GraphileConfig.Preset = {
 	extends: [
@@ -14,8 +16,10 @@ const preset: GraphileConfig.Preset = {
 		PgSimplifyInflectionPreset
 	],
 	plugins: [
+		SubscriptionPlugin,
 		ReasonableLimitsPlugin,
-		FancyMutationsPlugin
+		FancyMutationsPlugin,
+		SubscriptionsPlugin
 	],
 	disablePlugins: ['NodePlugin'],
 	pgServices: [
@@ -24,7 +28,7 @@ const preset: GraphileConfig.Preset = {
 			// Database connection string, read from an environmental variable:
 			connectionString: process.env.PG_URI,
 			pgSettings(ctx) {
-				let teamId = ctx.node.req.headers['org-id']
+				let teamId = ctx.node?.req?.headers['org-id']
 				if(typeof teamId !== 'string') {
 					teamId = 'default-org-id'
 				}
@@ -39,10 +43,8 @@ const preset: GraphileConfig.Preset = {
 			schemas: ['app'],
 		}),
 	],
-	grafserv: { watch: true },
-	grafast: {
-		explain: true,
-	},
+	grafserv: { watch: true, websockets: true },
+	grafast: { explain: true },
 	schema: {
 		defaultBehavior: '-single',
 	},

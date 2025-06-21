@@ -51,13 +51,12 @@ export const graphQLSchemaHook: Hook = (
 		if(updateObj) {
 			const updateFieldName = inflection
 				.camelCase(inflection.pluralize(`update_${codec.name}`))
-			console.log('updateObj', updateObj)
 			mutations[updateFieldName] = updateObj
 			for(const unique of table.uniques) {
 				const fieldName = inflection
 					.updateByKeysField({ resource: table, unique })
-				console.log('updateFieldName', fieldName)
-				// delete existingFields[deleteFieldName]
+				// console.log('updateFieldName', fieldName)
+				delete existingFields[fieldName]
 			}
 		}
 

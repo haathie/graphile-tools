@@ -6,9 +6,9 @@ import preset from './graphile.config.ts'
 const app = express()
 
 const pgl = postgraphile(preset)
-const srv = pgl.createServ(grafserv)
-srv.addTo(app, null)
-
-app.listen(5678, () => {
+const pglServ = pgl.createServ(grafserv)
+const srv = app.listen(5678, () => {
 	console.log('Server is running on http://localhost:5678')
 })
+
+pglServ.addTo(app, srv)
