@@ -1,5 +1,6 @@
 import express from 'express'
 import { postgraphile } from 'postgraphile'
+import { createHttpTerminator } from 'http-terminator'
 import { grafserv } from 'postgraphile/grafserv/express/v4'
 import preset from './graphile.config.ts'
 
@@ -11,4 +12,19 @@ const srv = app.listen(5678, () => {
 	console.log('Server is running on http://localhost:5678')
 })
 
+const terminator = createHttpTerminator({
+	server: srv,
+	gracefulTerminationTimeout: 5_000
+})
+
 pglServ.addTo(app, srv)
+
+process.once('SIGINT', async() => {
+	await pglServ.release()
+	console.log('PostGraphile server released')
+
+	await terminator.terminate()
+	console.log('Server closed')
+
+	process.exit(0)
+})

@@ -40,7 +40,7 @@ CREATE OR REPLACE FUNCTION postgraphile_meta.get_tmp_queue_name(
 	device_id VARCHAR DEFAULT postgraphile_meta.get_session_device_id()
 ) RETURNS VARCHAR AS $$
 	SELECT 'postg_tmp_sub_' || device_id
-$$ LANGUAGE sql IMMUTABLE STRICT PARALLEL SAFE;
+$$ LANGUAGE sql IMMUTABLE STRICT PARALLEL SAFE SECURITY DEFINER;
 
 CREATE TABLE IF NOT EXISTS postgraphile_meta.active_queues(
 	name VARCHAR(64) PRIMARY KEY,
@@ -91,7 +91,8 @@ BEGIN
 
 	RETURN NEW;
 END;
-$$ LANGUAGE plpgsql PARALLEL SAFE;
+$$ LANGUAGE plpgsql PARALLEL SAFE SECURITY DEFINER;
+
 CREATE TRIGGER trg_populate_queue_name
 BEFORE INSERT ON postgraphile_meta.subscriptions
 FOR EACH ROW
@@ -147,11 +148,11 @@ SELECT
 		-- diff
 		CASE
 			WHEN change->>'kind' = 'update'
-				THEN postgraphile_meta.jsonb_diff(before, after)
+				THEN postgraphile_meta.jsonb_diff(after, before)
 		END
 	) FROM (
 		SELECT *, jsonb_array_elements(data::jsonb->'change') AS change
-		FROM pg_catalog.pg_logical_slot_peek_changes(
+		FROM pg_catalog.pg_logical_slot_get_changes(
 			slot_name, upto_lsn, upto_nchanges, VARIADIC options
 		)
 ) AS cs
@@ -168,7 +169,7 @@ $$ LANGUAGE sql VOLATILE;
 CREATE OR REPLACE FUNCTION postgraphile_meta.send_changes_to_subscriptions(
 	slot_name name,
 	upto_lsn pg_lsn DEFAULT NULL,
-	upto_nchanges int DEFAULT 10,
+	upto_nchanges int DEFAULT 1000,
 	VARIADIC options text[] DEFAULT '{}'::text[]
 ) RETURNS VOID AS $$
 BEGIN
@@ -198,12 +199,12 @@ BEGIN
 			FROM changes
 			GROUP BY queue_name
 		)
-		SELECT pgmb.send(queue_name, records) FROM grouped_changes
+		SELECT ARRAY(SELECT * FROM pgmb.send(queue_name, records)) FROM grouped_changes
 	);
 END
 $$ LANGUAGE plpgsql PARALLEL SAFE;
 
-CREATE OR REPLACE FUNCTION postgraphile_meta.remove_stale_devices_and_subs()
+CREATE OR REPLACE FUNCTION postgraphile_meta.remove_all_stale_devices_and_subs()
 RETURNS RECORD AS $$
 DECLARE
 	que_del_count INT;
@@ -223,11 +224,23 @@ BEGIN
 END
 $$ LANGUAGE plpgsql PARALLEL SAFE;
 
-CREATE OR REPLACE FUNCTION postgraphile_meta.mark_current_device_queue_active()
+CREATE OR REPLACE FUNCTION postgraphile_meta.remove_stale_subscriptions(
+	device_id VARCHAR
+) RETURNS VOID AS $$
+BEGIN
+	DELETE FROM postgraphile_meta.subscriptions
+	WHERE pgmb_queue_name = postgraphile_meta.get_tmp_queue_name(device_id)
+		AND is_temporary = TRUE;
+END
+$$ LANGUAGE plpgsql PARALLEL SAFE;
+
+CREATE OR REPLACE FUNCTION postgraphile_meta.mark_device_queue_active(
+	device_id VARCHAR(64)
+)
 RETURNS VOID AS $$
 BEGIN
 	INSERT INTO postgraphile_meta.active_queues(name, last_activity_at)
-	VALUES (postgraphile_meta.get_tmp_queue_name(), NOW())
+	VALUES (postgraphile_meta.get_tmp_queue_name(device_id), NOW())
 	ON CONFLICT (name) DO UPDATE
 	SET last_activity_at = NOW();
 END

@@ -1,8 +1,9 @@
-import { jsonParse } from 'postgraphile/@dataplan/json'
-import { pgSelectFromRecords, withPgClientTransaction, withSuperuserPgClientFromPgService, type PgCodecWithAttributes, type PgResource } from 'postgraphile/@dataplan/pg'
-import { constant, context, list, listen, object, type FieldPlanResolver } from 'postgraphile/grafast'
-import { type GraphQLFieldConfig, GraphQLInt, GraphQLList, GraphQLNonNull, GraphQLObjectType, type GraphQLObjectTypeConfig } from 'postgraphile/graphql'
-import { gql, makeExtendSchemaPlugin } from 'postgraphile/utils'
+import { type PgCodecWithAttributes, type PgResource, withPgClientTransaction } from 'postgraphile/@dataplan/pg'
+import { type FieldPlanResolver, listen, loadMany, type Step } from 'postgraphile/grafast'
+import { type GraphQLFieldConfig, GraphQLList, GraphQLNonNull, GraphQLObjectType, type GraphQLObjectTypeConfig } from 'postgraphile/graphql'
+import { LDSSource, type PgChangeData } from './lds.ts'
+import { hostname } from 'os'
+import { Pool } from 'pg'
 
 type _PgResource = PgResource<string, PgCodecWithAttributes>
 
@@ -14,7 +15,23 @@ type Hook = NonNullable<
 
 type PlanResolver = FieldPlanResolver<any, any, any>
 
+declare global {
+	namespace GraphileConfig {
+		interface Preset {
+			subscriptions?: {
+				deviceId: string
+				publishChanges?: boolean
+			}
+		}
+	}
+}
+
+let subSrc: LDSSource
+
 const graphQLSchemaHook: Hook = (config, build) => {
+	// todo: use behaviours to determine this
+	subSrc.tablePattern = 'app.*'
+
 	const subs: GraphQLObjectTypeConfig<any, any>['fields'] = {}
 	const { allPgCodecs, inflection } = build
 	const existingFields = config.subscription?.getFields()
@@ -36,6 +53,8 @@ const graphQLSchemaHook: Hook = (config, build) => {
 			continue // no model, cannot subscribe
 		}
 
+		const pureType = getPureType(resource, model)
+		const partialType = getPartialType(pureType)
 		const createdEvName = inflection.camelCase(
 			inflection.pluralize(`created_${model.name}`)
 		)
@@ -47,12 +66,14 @@ const graphQLSchemaHook: Hook = (config, build) => {
 		)
 
 		subs[createdEvName] = {
-			type: new GraphQLNonNull(new GraphQLList(new GraphQLNonNull(model))),
+			type: new GraphQLNonNull(new GraphQLList(new GraphQLNonNull(pureType))),
 			extensions: {
 				grafast: {
-					subscribePlan: createSubscriptionPlan(resource, 'insert'),
-					plan(parent) {
-						return pgSelectFromRecords(resource, parent)
+					subscribePlan: createSubscriptionPlan(resource, subSrc, 'insert'),
+					plan(parent: Step<PgChangeData[]>) {
+						return loadMany(parent, (values) => (
+							values.map(v => v.map(v => v.row_data))
+						))
 					}
 				}
 			}
@@ -61,10 +82,11 @@ const graphQLSchemaHook: Hook = (config, build) => {
 			type: new GraphQLNonNull(new GraphQLList(new GraphQLNonNull(pkType))),
 			extensions: {
 				grafast: {
-					subscribePlan: createSubscriptionPlan(resource, 'delete'),
-					plan(parent) {
-						console.log('Subscription plan for deleted:', parent)
-						return parent
+					subscribePlan: createSubscriptionPlan(resource, subSrc, 'delete'),
+					plan(parent: Step<PgChangeData[]>) {
+						return loadMany(parent, (values) => (
+							values.map(v => v.map(v => v.row_data))
+						))
 					}
 				}
 			}
@@ -74,7 +96,7 @@ const graphQLSchemaHook: Hook = (config, build) => {
 			name: inflection.upperCamelCase(`${model.name}Update`),
 			fields: {
 				key: { type: new GraphQLNonNull(pkType) },
-				changes: { type: new GraphQLNonNull(model) }
+				changes: { type: new GraphQLNonNull(partialType) }
 			}
 		})
 
@@ -82,10 +104,11 @@ const graphQLSchemaHook: Hook = (config, build) => {
 			type: new GraphQLNonNull(new GraphQLList(new GraphQLNonNull(updateObj))),
 			extensions: {
 				grafast: {
-					subscribePlan: createSubscriptionPlan(resource, 'update'),
-					plan(parent) {
-						console.log('plan for updated:', parent)
-						return parent
+					subscribePlan: createSubscriptionPlan(resource, subSrc, 'update'),
+					plan(parent: Step<PgChangeData[]>) {
+						return loadMany(parent, (values) => (
+							values.map(v => v.map(v => ({ key: v.row_before!, changes: v.diff! })))
+						))
 					}
 				}
 			}
@@ -117,17 +140,51 @@ const graphQLSchemaHook: Hook = (config, build) => {
 				attributeName: attr,
 				codec: resource.codec
 			})
+			const { type, extensions } = ogFields[fieldName]
 
-			map[fieldName] = { type: ogFields[fieldName].type }
+			map[fieldName] = { type, extensions }
 			return map
 		}, {} as { [fieldName: string]: GraphQLFieldConfig<any, any> })
 		return new GraphQLObjectType({ name: typeName, fields: newFields })
 	}
-}
 
+	function getPureType(resource: _PgResource, ogModel: GraphQLObjectType) {
+		const typeName = inflection.upperCamelCase(`pure_${ogModel.name}`)
+		const ogFields = ogModel.getFields()
+		const newFields = Object.keys(resource.codec.attributes)
+			.reduce((map, attr) => {
+				const fieldName = inflection.attribute({
+					attributeName: attr,
+					codec: resource.codec
+				})
+				const { type, extensions } = ogFields[fieldName]
+
+				map[fieldName] = { type, extensions }
+				return map
+			}, {} as { [fieldName: string]: GraphQLFieldConfig<any, any> })
+		return new GraphQLObjectType({ name: typeName, fields: newFields })
+	}
+
+	function getPartialType(model: GraphQLObjectType) {
+		return new GraphQLObjectType({
+			name: inflection.upperCamelCase(`partial_${model.name}`),
+			fields: Object.entries(model.getFields()).reduce((map, [name, field]) => {
+
+				map[name] = {
+					type: field.type instanceof GraphQLNonNull
+						? field.type.ofType
+						: field.type,
+					extensions: field.extensions
+				}
+				return map
+			}, {} as { [fieldName: string]: GraphQLFieldConfig<any, any> })
+		})
+	}
+}
 
 function createSubscriptionPlan(
 	resource: _PgResource,
+	subSrc: LDSSource,
 	kind: 'insert' | 'delete' | 'update'
 ) {
 	const { codec: { extensions: { pg: pgInfo } = {} } } = resource
@@ -135,9 +192,9 @@ function createSubscriptionPlan(
 		throw new Error(`Resource ${resource.name} does not have pg info`)
 	}
 
-	const plan: PlanResolver = (parent, args) => {
-		return withPgClientTransaction(resource.executor, parent, async client => {
-			const { rows } = await client.query({
+	const plan: PlanResolver = (parent) => {
+		const $subId = withPgClientTransaction(resource.executor, parent, async client => {
+			const { rows: [row] } = await client.query<{ id: string, topic: string }>({
 				text: `INSERT INTO postgraphile_meta.subscriptions(topic,conditions_input)
 					VALUES(
 						postgraphile_meta.get_topic_from_change_json(
@@ -152,55 +209,102 @@ function createSubscriptionPlan(
 				values: [pgInfo.schemaName, pgInfo.name, kind, '{}']
 			})
 
-			console.log('row ', rows)
-			throw new Error('LOL')
+			console.log(`created sub ${row.id}, on topic ${row.topic}`)
+
+			return row.id
 		})
+
+		return listen(subSrc, $subId)
 	}
 
 	return plan
 }
 
-// export const SubscriptionsPlugin: GraphileConfig.Plugin = makeExtendSchemaPlugin(build => {
-// 	return {
-// 		typeDefs: gql`
-// 		extend type Subscription {
-// 			demo: DemoPayload
-// 		}
-
-// 		type DemoPayload {
-// 			value: Int
-// 		}
-// 		`,
-// 		objects: {
-// 			Subscription: {
-// 				plans: {
-// 					demo: {
-// 						subscriptionPlan(...args) {
-// 							console.log('Demo subscription plan args:', args)
-// 						},
-// 						plan(parent) {
-// 							return parent
-// 						}
-// 					}
-// 				}
-// 			},
-// 			DemoPayload: {
-// 				plans: {
-// 					value($event) {
-// 						return constant(1)
-// 					},
-// 				},
-// 			},
-// 		}
-// 	}
-// })
-// SubscriptionsPlugin.schema!.hooks!.GraphQLSchema = graphQLSchemaHook
-
 export const SubscriptionsPlugin: GraphileConfig.Plugin = {
 	name: 'SubscriptionsPlugin',
+	grafserv: {
+		middleware: {
+			async setPreset(
+				next,
+				{
+					resolvedPreset: {
+						pgServices = [],
+						subscriptions: {
+							deviceId,
+							publishChanges
+						} = {}
+					}
+				}
+			) {
+				if(subSrc) {
+					return next()
+				}
+
+				if(!deviceId) {
+					deviceId = getCleanedDeviceId(hostname())
+					console.log(
+						'No deviceId provided, using hostname as deviceId:',
+						deviceId
+					)
+				}
+
+				let superuserPool: Pool | undefined
+				for(const service of pgServices) {
+					superuserPool = service.adaptorSettings?.superuserPool
+					if(!superuserPool) {
+						continue
+					}
+
+					const { pgSettings, release } = service
+					service.pgSettings = (...args) => {
+						const settings = typeof pgSettings === 'function'
+							? pgSettings?.(...args)
+							: pgSettings || {}
+						// ensure device_id is set
+						settings['app.device_id'] = deviceId
+						return settings
+					}
+
+					service.release = async(...args) => {
+						console.log('Releasing subscriptions source...')
+						await subSrc?.release()
+						await release?.(...args)
+						console.log('Subscriptions source released.')
+					}
+
+					break
+				}
+
+				if(!superuserPool) {
+					throw new Error('No superuser pool found in preset.')
+				}
+
+				subSrc = new LDSSource({
+					pool: superuserPool,
+					// will populate later
+					tablePattern: '',
+					deviceId: deviceId,
+				})
+				await subSrc.listen()
+				console.log('Subscriptions source initialized.')
+
+				if(publishChanges) {
+					await subSrc.startPublishChangeLoop()
+					console.log('Publish change loop started.')
+				}
+
+				return next()
+			}
+		}
+	},
 	schema: {
 		hooks: {
 			GraphQLSchema: graphQLSchemaHook
 		}
-	}
+	},
+}
+
+function getCleanedDeviceId(deviceId: string) {
+	// Remove any non-alphanumeric characters and convert to lowercase
+	return deviceId.replace(/[^a-z0-9\_]/gi, '').toLowerCase()
 }

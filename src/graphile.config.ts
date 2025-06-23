@@ -27,22 +27,30 @@ const preset: GraphileConfig.Preset = {
 		makePgService({
 			// Database connection string, read from an environmental variable:
 			connectionString: process.env.PG_URI,
+			superuserConnectionString: process.env.PG_URI,
 			pgSettings(ctx) {
 				let teamId = ctx.node?.req?.headers['org-id']
 				if(typeof teamId !== 'string') {
 					teamId = 'default-org-id'
 				}
 
-				return { 'role': 'app_user', 'app.org_id': teamId, 'app.user_id': 'ad_singh' }
+				return {
+					'role': 'app_user',
+					'app.org_id': teamId,
+					'app.user_id': 'ad_singh',
+				}
 			},
 			pgSettingsForIntrospection: {
 				'role': 'app_user'
 			},
-			pubsub: true,
 			// List of database schemas to expose:
 			schemas: ['app'],
 		}),
 	],
+	subscriptions: {
+		deviceId: process.env.DEVICE_ID || 'default-device',
+		publishChanges: true
+	},
 	grafserv: { watch: true, websockets: true },
 	grafast: { explain: true },
 	schema: {

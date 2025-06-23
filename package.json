@@ -17,6 +17,7 @@
     "@graphile/simplify-inflection": "^8.0.0-beta.6",
     "@haathie/pgmb": "^0.1.8",
     "express": "^5.1.0",
+    "http-terminator": "^3.2.0",
     "pg": "^8.6.0",
     "postgraphile": "^5.0.0-beta.41"
   },
