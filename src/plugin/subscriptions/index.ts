@@ -1,7 +1,7 @@
 import { hostname } from 'os'
 import { Pool } from 'pg'
 import { type PgCodecWithAttributes, type PgResource, type PgResourceUnique, withPgClientTransaction } from 'postgraphile/@dataplan/pg'
-import { type FieldPlanResolver, listen, loadMany, Step } from 'postgraphile/grafast'
+import { type FieldPlanResolver, lambda, listen, loadMany, Step } from 'postgraphile/grafast'
 import { type GraphQLFieldConfig, GraphQLInputObjectType, GraphQLList, GraphQLNonNull, GraphQLObjectType, type GraphQLObjectTypeConfig } from 'postgraphile/graphql'
 import { type SQL, sql } from 'postgraphile/pg-sql2'
 import { LDSSource, type PgChangeData, type PgChangeOp } from './lds.ts'
@@ -218,7 +218,12 @@ function createSubscriptionPlan(
 		const $whereBuilder = new PgWhereBuilder(alias)
 		args.apply($whereBuilder)
 
-		const $subId = withPgClientTransaction(resource.executor, $whereBuilder, async(client, cond) => {
+		const $argsRaw = args.getRaw()
+		const $sqlAndRaw = lambda([$whereBuilder, $argsRaw], ([cond, args]) => {
+			return { cond, args }
+		})
+
+		const $subId = withPgClientTransaction(resource.executor, $sqlAndRaw, async(client, { cond, args }) => {
 			const sampleJson = '{}'
 			const compiledSql = cond
 				? sql.compile(
@@ -240,6 +245,9 @@ function createSubscriptionPlan(
 					// 1st param is just a placeholder
 					conditionsParams: compiledSql?.values?.slice(1),
 					type: 'websocket',
+					additionalData: {
+						inputCondition: args?.condition,
+					}
 				}
 			)
 			const { rows: [row] } = await client

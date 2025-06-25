@@ -13,7 +13,11 @@ GRANT
 	DELETE
 ON postgraphile_meta.subscriptions TO "app_user";
 -- Create RLS policies for subscriptions table
+DROP POLICY IF EXISTS app_user_subscriptions ON postgraphile_meta.subscriptions;
 CREATE POLICY app_user_subscriptions ON postgraphile_meta.subscriptions
 FOR ALL TO "app_user"
+-- allow selecting all subs, as they're not really selected
 USING (TRUE)
-WITH CHECK (TRUE);
+WITH CHECK (
+	additional_data->'inputCondition'->>'teamId' = current_setting('app.org_id')
+);
