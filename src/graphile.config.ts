@@ -21,7 +21,6 @@ const preset: GraphileConfig.Preset = {
 		FancyMutationsPlugin,
 		SubscriptionsPlugin
 	],
-	disablePlugins: ['NodePlugin'],
 	pgServices: [
 		/* list of PG database configurations, e.g.: */
 		makePgService({

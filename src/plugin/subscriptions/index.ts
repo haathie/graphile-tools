@@ -4,6 +4,7 @@ import { type PgCodecWithAttributes, type PgResource, type PgResourceUnique, wit
 import { type FieldPlanResolver, lambda, listen, loadMany, Step } from 'postgraphile/grafast'
 import { type GraphQLFieldConfig, GraphQLInputObjectType, GraphQLList, GraphQLNonNull, GraphQLObjectType, type GraphQLObjectTypeConfig } from 'postgraphile/graphql'
 import { type SQL, sql } from 'postgraphile/pg-sql2'
+import { getRelationFieldName } from '../fancy-mutations/utils.ts'
 import { LDSSource, type PgChangeData, type PgChangeOp } from './lds.ts'
 import { PgWhereBuilder } from './PgWhereBuilder.ts'
 
@@ -87,8 +88,11 @@ const graphQLSchemaHook: Hook = (config, build) => {
 			inflection.pluralize(`updated_${model.name}`)
 		)
 
+		const subsArgs = { 'condition': { type: conditionArg } }
+
 		subs[createdEvName] = {
 			type: new GraphQLNonNull(new GraphQLList(new GraphQLNonNull(pureType))),
+			args: subsArgs,
 			extensions: {
 				grafast: {
 					subscribePlan: createSubscriptionPlan(resource, subSrc, 'insert'),
@@ -102,6 +106,7 @@ const graphQLSchemaHook: Hook = (config, build) => {
 		}
 		subs[deletedEvName] = {
 			type: new GraphQLNonNull(new GraphQLList(new GraphQLNonNull(pkType))),
+			args: subsArgs,
 			extensions: {
 				grafast: {
 					subscribePlan: createSubscriptionPlan(resource, subSrc, 'delete'),
@@ -124,9 +129,7 @@ const graphQLSchemaHook: Hook = (config, build) => {
 
 		subs[updatedEvName] = {
 			type: new GraphQLNonNull(new GraphQLList(new GraphQLNonNull(updateObj))),
-			args: {
-				'condition': { type: conditionArg }
-			},
+			args: subsArgs,
 			extensions: {
 				grafast: {
 					subscribePlan: createSubscriptionPlan(resource, subSrc, 'update'),
@@ -155,32 +158,51 @@ const graphQLSchemaHook: Hook = (config, build) => {
 			return
 		}
 
-		const typeName = inflection.upperCamelCase(`${ogModel.name}Id`)
+		const typeName = inflection.upperCamelCase(`${ogModel.name}Key`)
 		const ogFields = ogModel.getFields()
-		const newFields = pk.attributes.reduce((map, attr) => {
-			const fieldName = inflection.attribute({
-				attributeName: attr,
-				codec: resource.codec
-			})
-			const { type, extensions } = ogFields[fieldName]
 
-			map[fieldName] = { type, extensions }
-			return map
-		}, {} as { [fieldName: string]: GraphQLFieldConfig<any, any> })
-		return new GraphQLObjectType({ name: typeName, fields: newFields })
-	}
+		// if the NodeID plugin is enabled, we'll use that
+		const nodeIdFieldName = inflection.nodeIdFieldName()
+		const nodeIdField = ogFields[nodeIdFieldName]
 
-	function getPureType(resource: _PgResource, ogModel: GraphQLObjectType) {
-		const typeName = inflection.upperCamelCase(`pure_${ogModel.name}`)
-		const ogFields = ogModel.getFields()
-		const newFields = Object.keys(resource.codec.attributes)
-			.reduce((map, attr) => {
+		let newFields: { [fieldName: string]: GraphQLFieldConfig<any, any> } = {}
+		if(nodeIdField) {
+			newFields = {
+				[nodeIdFieldName]: {
+					type: nodeIdField.type,
+					extensions: nodeIdField.extensions
+				}
+			}
+		} else {
+			newFields = pk.attributes.reduce((map, attr) => {
 				const fieldName = inflection.attribute({
 					attributeName: attr,
 					codec: resource.codec
 				})
 				const { type, extensions } = ogFields[fieldName]
 
+				map[fieldName] = { type, extensions }
+				return map
+			}, {} as { [fieldName: string]: GraphQLFieldConfig<any, any> })
+		}
+
+		return new GraphQLObjectType({ name: typeName, fields: newFields })
+	}
+
+	function getPureType(resource: _PgResource, ogModel: GraphQLObjectType) {
+		const typeName = inflection.upperCamelCase(`pure_${ogModel.name}`)
+		const ogFields = ogModel.getFields()
+		const relationFieldNames = Object.keys(resource.getRelations())
+			.map(name => getRelationFieldName(name, resource, build))
+
+		const newFields = Object.entries(ogFields)
+			.reduce((map, [fieldName, field]) => {
+				// we'll skip all relations
+				if(relationFieldNames.includes(fieldName)) {
+					return map
+				}
+
+				const { type, extensions } = field
 				map[fieldName] = { type, extensions }
 				return map
 			}, {} as { [fieldName: string]: GraphQLFieldConfig<any, any> })
