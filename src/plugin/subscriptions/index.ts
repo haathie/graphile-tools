@@ -1,11 +1,13 @@
-import { type PgCodecWithAttributes, type PgResource, withPgClientTransaction } from 'postgraphile/@dataplan/pg'
-import { type FieldPlanResolver, listen, loadMany, type Step } from 'postgraphile/grafast'
-import { type GraphQLFieldConfig, GraphQLList, GraphQLNonNull, GraphQLObjectType, type GraphQLObjectTypeConfig } from 'postgraphile/graphql'
-import { LDSSource, type PgChangeData } from './lds.ts'
 import { hostname } from 'os'
 import { Pool } from 'pg'
+import { type PgCodecWithAttributes, type PgResource, type PgResourceUnique, withPgClientTransaction } from 'postgraphile/@dataplan/pg'
+import { type FieldPlanResolver, listen, loadMany, Step } from 'postgraphile/grafast'
+import { type GraphQLFieldConfig, GraphQLInputObjectType, GraphQLList, GraphQLNonNull, GraphQLObjectType, type GraphQLObjectTypeConfig } from 'postgraphile/graphql'
+import { type SQL, sql } from 'postgraphile/pg-sql2'
+import { LDSSource, type PgChangeData, type PgChangeOp } from './lds.ts'
+import { PgWhereBuilder } from './PgWhereBuilder.ts'
 
-type _PgResource = PgResource<string, PgCodecWithAttributes>
+type _PgResource = PgResource<string, PgCodecWithAttributes, PgResourceUnique[], any>
 
 type Hook = NonNullable<
 	NonNullable<
@@ -36,11 +38,12 @@ const graphQLSchemaHook: Hook = (config, build) => {
 	const { allPgCodecs, inflection } = build
 	const existingFields = config.subscription?.getFields()
 
-	for(const codec of allPgCodecs) {
-		if(!codec.extensions?.isTableLike) {
+	for(const _codec of allPgCodecs) {
+		if(!_codec.extensions?.isTableLike || !_codec.attributes) {
 			continue
 		}
 
+		const codec = _codec as PgCodecWithAttributes
 		const resource = build.pgTableResource(codec) as _PgResource
 		const model = build
 			.getGraphQLTypeByPgCodec(codec, 'output') as GraphQLObjectType
@@ -51,6 +54,25 @@ const graphQLSchemaHook: Hook = (config, build) => {
 		const pkType = getPkType(resource, model)
 		if(!pkType) {
 			continue // no model, cannot subscribe
+		}
+
+		const queryType = build.getTypeByName('Query') as GraphQLObjectType
+		if(!queryType) {
+			continue
+		}
+
+		const queryFieldName = inflection
+			.customQueryConnectionField({ resource })
+		const queryField = queryType.getFields()[queryFieldName]
+		if(!queryField) {
+			continue
+		}
+
+		const conditionArg = queryField.args
+			.find(a => a.name === 'condition')
+			?.type as GraphQLInputObjectType
+		if(!conditionArg) {
+			continue
 		}
 
 		const pureType = getPureType(resource, model)
@@ -102,6 +124,9 @@ const graphQLSchemaHook: Hook = (config, build) => {
 
 		subs[updatedEvName] = {
 			type: new GraphQLNonNull(new GraphQLList(new GraphQLNonNull(updateObj))),
+			args: {
+				'condition': { type: conditionArg }
+			},
 			extensions: {
 				grafast: {
 					subscribePlan: createSubscriptionPlan(resource, subSrc, 'update'),
@@ -115,10 +140,7 @@ const graphQLSchemaHook: Hook = (config, build) => {
 		}
 	}
 
-	const newSubs = new GraphQLObjectType({
-		name: 'Subscriptions',
-		fields: subs,
-	})
+	const newSubs = new GraphQLObjectType({ name: 'Subscriptions', fields: subs })
 	if(existingFields) {
 		Object.assign(existingFields, newSubs.getFields())
 	} else {
@@ -169,7 +191,6 @@ const graphQLSchemaHook: Hook = (config, build) => {
 		return new GraphQLObjectType({
 			name: inflection.upperCamelCase(`partial_${model.name}`),
 			fields: Object.entries(model.getFields()).reduce((map, [name, field]) => {
-
 				map[name] = {
 					type: field.type instanceof GraphQLNonNull
 						? field.type.ofType
@@ -185,29 +206,44 @@ const graphQLSchemaHook: Hook = (config, build) => {
 function createSubscriptionPlan(
 	resource: _PgResource,
 	subSrc: LDSSource,
-	kind: 'insert' | 'delete' | 'update'
+	kind: PgChangeOp
 ) {
 	const { codec: { extensions: { pg: pgInfo } = {} } } = resource
 	if(!pgInfo) {
 		throw new Error(`Resource ${resource.name} does not have pg info`)
 	}
 
-	const plan: PlanResolver = (parent) => {
-		const $subId = withPgClientTransaction(resource.executor, parent, async client => {
-			const { rows: [row] } = await client.query<{ id: string, topic: string }>({
-				text: `INSERT INTO postgraphile_meta.subscriptions(topic,conditions_input)
-					VALUES(
-						postgraphile_meta.get_topic_from_change_json(
-							jsonb_object(
-								ARRAY['schema', 'table', 'kind'],
-								ARRAY[$1, $2, $3]::text[]
-							)
-						),
-						$4::jsonb
-					)
-					RETURNING id, topic`,
-				values: [pgInfo.schemaName, pgInfo.name, kind, '{}']
-			})
+	const plan: PlanResolver = (parent, args) => {
+		const alias = sql`t`
+		const $whereBuilder = new PgWhereBuilder(alias)
+		args.apply($whereBuilder)
+
+		const $subId = withPgClientTransaction(resource.executor, $whereBuilder, async(client, cond) => {
+			const sampleJson = '{}'
+			const compiledSql = cond
+				? sql.compile(
+					sql`select 1
+						from jsonb_populate_record(
+							null::${resource.from as SQL},
+							${sql.value(sampleJson)}::jsonb
+						) ${alias} WHERE ${cond}`
+				)
+				: undefined
+			const [text, values] = subSrc.getCreateSubscriptionSql(
+				{
+					topic: {
+						schema: pgInfo.schemaName,
+						table: pgInfo.name,
+						kind
+					},
+					conditionsSql: compiledSql?.text,
+					// 1st param is just a placeholder
+					conditionsParams: compiledSql?.values?.slice(1),
+					type: 'websocket',
+				}
+			)
+			const { rows: [row] } = await client
+				.query<{ id: string, topic: string }>({ text, values })
 
 			console.log(`created sub ${row.id}, on topic ${row.topic}`)
 

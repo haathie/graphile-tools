@@ -2,7 +2,14 @@ GRANT USAGE, CREATE ON SCHEMA postgraphile_meta TO "app_user";
 
 GRANT
 	SELECT,
-	INSERT(topic, conditions_input, type, additional_data),
+	INSERT(
+		topic,
+		type,
+		additional_data,
+		conditions_sql,
+		conditions_params,
+		is_temporary
+	),
 	DELETE
 ON postgraphile_meta.subscriptions TO "app_user";
 -- Create RLS policies for subscriptions table

@@ -23,7 +23,7 @@ CREATE TYPE postgraphile_meta.change_info AS (
 	op_table varchar(64), -- table name
 	op_schema varchar(64), -- schema name
 	op_topic varchar(255),
-	row_before jsonb, -- the old state of the row (only for inserts & updates)
+	row_before jsonb, -- the old state of the row (only for updates)
 	row_data jsonb, -- the current state of the row
 		-- (after for inserts, updates & before for deletes)
 	diff jsonb -- the difference between row_after & row_before. For updates only
@@ -55,7 +55,15 @@ CREATE TABLE IF NOT EXISTS postgraphile_meta.subscriptions (
 		postgraphile_meta.get_tmp_queue_name()
 		REFERENCES pgmb.queues(name) ON DELETE CASCADE,
 	topic VARCHAR(255) NOT NULL,
-	conditions_input JSONB,
+	-- if conditions_sql is NULL, then the subscription will receive
+	-- all changes for the topic. Otherwise, it will receive only changes
+	-- where the change document matches the conditions_sql. The
+	-- first parameter of the conditions_sql will be the change document
+	-- as a JSONB object.
+	-- Eg. conditions_sql = 'SELECT 1 WHERE $1->>''user_id'' = $2',
+	-- conditions_params = ARRAY['123']
+	conditions_sql TEXT,
+	conditions_params TEXT[],
 	-- if temporary, then the subscription will be removed
 	-- when the connection closes
 	is_temporary BOOLEAN NOT NULL DEFAULT TRUE,
@@ -70,22 +78,13 @@ CREATE INDEX IF NOT EXISTS idx_subscriptions_queue_name
 
 ALTER TABLE postgraphile_meta.subscriptions ENABLE ROW LEVEL SECURITY;
 
--- Create fn & trigger to populate the queue name
+-- Create fn & trigger to populate the queue name to the permanent queue
+-- if the subscription is not temporary and the queue name is not set
 CREATE OR REPLACE FUNCTION postgraphile_meta.populate_queue_name()
 RETURNS TRIGGER AS $$
 BEGIN
 	-- If the queue name is not set, then set it to the permanent queue
-	IF NEW.is_temporary THEN
-		PERFORM pgmb.assert_queue(
-			NEW.pgmb_queue_name,
-			default_headers := '{"contentType":"application/json"}'::jsonb,
-			queue_type := 'unlogged'::pgmb.queue_type
-		);
-
-		INSERT INTO postgraphile_meta.active_queues(name)
-		VALUES (NEW.pgmb_queue_name)
-		ON CONFLICT DO NOTHING;
-	ELSIF NEW.pgmb_queue_name IS NULL THEN 
+	IF NOT NEW.is_temporary AND NEW.pgmb_queue_name IS NULL THEN 
 		NEW.pgmb_queue_name := 'postg_permanent_subs';
 	END IF;
 
@@ -98,6 +97,31 @@ BEFORE INSERT ON postgraphile_meta.subscriptions
 FOR EACH ROW
 EXECUTE FUNCTION postgraphile_meta.populate_queue_name();
 
+-- Function to check if a subscription should receive a change
+CREATE OR REPLACE FUNCTION postgraphile_meta.should_subscription_recv_change(
+	sub postgraphile_meta.subscriptions,
+	cs postgraphile_meta.change_info
+)
+RETURNS BOOLEAN AS $$
+DECLARE
+	final_query TEXT := sub.conditions_sql;
+	-- We'll use before row data if available, as the person may receive the change
+	-- before the row is updated in the database.
+	row_data jsonb := COALESCE(cs.row_before, cs.row_data);
+	params TEXT[] := array_prepend(row_data::varchar, sub.conditions_params);
+	rslt BOOLEAN := false;
+BEGIN
+	-- loop through params and replace each occurrence of $1, $2, etc.
+	-- with $1[i] where i is the index of the parameter
+	FOR i IN 1 .. array_length(params, 1) LOOP
+		final_query := replace(final_query, '$' || i, '$1[' || i || ']');
+	END LOOP;
+
+	EXECUTE final_query INTO rslt USING params;
+	RETURN rslt;
+END
+$$ LANGUAGE plpgsql IMMUTABLE STRICT PARALLEL SAFE;
+
 -- Creates a function to compute the difference between two JSONB objects
 -- Treats 'null' values, and non-existent keys as equal
 CREATE OR REPLACE FUNCTION postgraphile_meta.jsonb_diff(a jsonb, b jsonb)
@@ -109,6 +133,7 @@ SELECT jsonb_object_agg(key, value) FROM (
 )
 $$ LANGUAGE sql IMMUTABLE STRICT PARALLEL SAFE;
 
+-- Function to get the topic from a wal2json single change JSON
 CREATE OR REPLACE FUNCTION postgraphile_meta.get_topic_from_change_json(
 	change_json jsonb
 ) RETURNS varchar(255) AS $$
@@ -135,7 +160,7 @@ SELECT
 		postgraphile_meta.get_topic_from_change_json(change),
 		-- before
 		CASE
-			WHEN change->>'kind' IN ('insert', 'update') THEN before
+			WHEN change->>'kind' = 'update' THEN before
 		END,
 		-- data
 		CASE
@@ -166,6 +191,7 @@ CROSS JOIN LATERAL jsonb_object(
 ) as before
 $$ LANGUAGE sql VOLATILE;
 
+-- Function to send changes to match & send changes to relevant subscriptions
 CREATE OR REPLACE FUNCTION postgraphile_meta.send_changes_to_subscriptions(
 	slot_name name,
 	upto_lsn pg_lsn DEFAULT NULL,
@@ -184,6 +210,10 @@ BEGIN
 			) AS cs
 			INNER JOIN postgraphile_meta.subscriptions s ON
 				s.topic = cs.op_topic
+				AND (
+					s.conditions_sql IS NULL
+					OR postgraphile_meta.should_subscription_recv_change(s, cs)
+				)
 			GROUP BY s.id
 		),
 		grouped_changes AS (

@@ -1,6 +1,6 @@
 import express from 'express'
-import { postgraphile } from 'postgraphile'
 import { createHttpTerminator } from 'http-terminator'
+import { postgraphile } from 'postgraphile'
 import { grafserv } from 'postgraphile/grafserv/express/v4'
 import preset from './graphile.config.ts'
 
@@ -14,7 +14,7 @@ const srv = app.listen(5678, () => {
 
 const terminator = createHttpTerminator({
 	server: srv,
-	gracefulTerminationTimeout: 5_000
+	gracefulTerminationTimeout: 1_500
 })
 
 pglServ.addTo(app, srv)

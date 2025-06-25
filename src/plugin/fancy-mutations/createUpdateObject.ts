@@ -1,7 +1,6 @@
 import { type PgCodecWithAttributes, PgResource, PgSelectStep } from 'postgraphile/@dataplan/pg'
 import { type FieldPlanResolver, lambda, Step } from 'postgraphile/grafast'
 import { type GraphQLFieldConfig, GraphQLInputObjectType, GraphQLInt, GraphQLList, GraphQLNonNull, GraphQLObjectType } from 'postgraphile/graphql'
-import { sql } from 'postgraphile/pg-sql2'
 import { PgSelectAndModify } from './PgSelectAndModify.js'
 
 type CreateMutationOpts = {

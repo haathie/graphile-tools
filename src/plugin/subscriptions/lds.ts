@@ -1,6 +1,6 @@
 import { JSONSerialiser, PGMBClient, type PGMBOnMessageOpts } from '@haathie/pgmb'
 import { Pool } from 'pg'
-import { PassThrough, Writable } from 'stream'
+import { PassThrough, type Writable } from 'stream'
 import { setTimeout } from 'timers/promises'
 
 type LDSSourceOptions = {
@@ -14,13 +14,28 @@ type LDSSourceOptions = {
 
 type Row = { [_: string]: unknown }
 
+export type PgChangeOp = 'insert' | 'update' | 'delete'
+
 export type PgChangeData = {
 	lsn: string
-	op: 'insert' | 'update' | 'delete'
+	op: PgChangeOp
 	op_topic: string
 	row_before: Row | null
 	row_data: Row
 	diff: Row | null
+}
+
+export type CreateSubscriptionOpts = {
+	topic: string | {
+		schema: string
+		table: string
+		kind: PgChangeOp
+	}
+	type: string
+	conditionsSql?: string
+	conditionsParams?: any[]
+	additionalData?: { [_: string]: unknown }
+	isTemporary?: boolean
 }
 
 type DataMap = { [_: string]: PgChangeData[] }
@@ -96,8 +111,74 @@ export class LDSSource {
 		}, 30 * 1000) // every 30 seconds
 	}
 
+	getCreateSubscriptionSql(
+		{
+			topic,
+			conditionsSql,
+			conditionsParams = [],
+			type,
+			additionalData = {},
+			isTemporary = true,
+		}: CreateSubscriptionOpts,
+	) {
+		const values: string[] = []
+		const params: unknown[] = []
+		if(typeof topic === 'string') {
+			params.push(topic)
+			values.push(`$${params.length}`)
+		} else {
+			params.push(topic.schema, topic.table, topic.kind)
+			values.push(
+				`postgraphile_meta.get_topic_from_change_json(
+					jsonb_object(
+						ARRAY['schema', 'table', 'kind'],
+						ARRAY[
+							$${params.length - 2}::varchar,
+							$${params.length - 1}::varchar,
+							$${params.length}::varchar
+						]
+					)
+				)`
+			)
+		}
+
+		if(conditionsSql) {
+			params.push(conditionsSql)
+			values.push(`$${params.length}`)
+
+			params.push(conditionsParams)
+			values.push(`$${params.length}::varchar[]`)
+		} else {
+			values.push('DEFAULT')
+			values.push('DEFAULT')
+		}
+
+		params.push(isTemporary)
+		values.push(`$${params.length}::boolean`)
+
+		params.push(type)
+		values.push(`$${params.length}::varchar`)
+
+		params.push(additionalData)
+		values.push(`$${params.length}::jsonb`)
+
+		const sql = `INSERT INTO postgraphile_meta.subscriptions(
+			topic,
+			conditions_sql,
+			conditions_params,
+			is_temporary,
+			type,
+			additional_data
+		)
+		VALUES(${values.join(', ')})
+		RETURNING id, topic
+		`
+		return [sql, params] as const
+	}
+
 	async subscribe(
-		subscriptionId: string | number
+		subscriptionId: string | number,
+		deleteOnClose = true
 	): Promise<AsyncIterableIterator<PgChangeData>> {
 		if(this.#closed) {
 			throw new Error('Source already closed.')
@@ -112,10 +193,7 @@ export class LDSSource {
 		console.log(`Creating stream for subscriptionId: ${subscriptionId}`)
 
 		const stream = new PassThrough({ objectMode: true, highWaterMark: 1 })
-		stream.on('close', () => {
-			console.log(`Stream closed for subscriptionId: ${subscriptionId}`)
-			delete this.#subscribers[subscriptionId]
-		})
+		stream.on('close', onEnd.bind(this))
 
 		this.#subscribers[subscriptionId] = stream
 
@@ -133,6 +211,30 @@ export class LDSSource {
 		}
 
 		return asyncIterator
+
+		async function onEnd(this: LDSSource) {
+			if(!this.#subscribers[subscriptionId]) {
+				return
+			}
+
+			console.log(`Stream closed for subscriptionId: ${subscriptionId}`)
+			delete this.#subscribers[subscriptionId]
+
+			if(deleteOnClose) {
+				try {
+					await this.#pool.query(
+						'DELETE FROM postgraphile_meta.subscriptions'
+						+ ' WHERE id = $1',
+						[subscriptionId]
+					)
+					console.log(`Deleted subscription: ${subscriptionId}`)
+				} catch(e: any) {
+					console.error(
+						`Error deleting subscription ${subscriptionId}:`, e
+					)
+				}
+			}
+		}
 	}
 
 	async startPublishChangeLoop() {
@@ -150,9 +252,8 @@ export class LDSSource {
 	}
 
 	async createPublisherSlot() {
-		const client = await this.#pool.connect()
 		try {
-			await client.query(
+			await this.#pool.query(
 				"SELECT pg_catalog.pg_create_logical_replication_slot($1, 'wal2json', $2)",
 				[this.slotName, false]
 			)
@@ -167,8 +268,6 @@ export class LDSSource {
 			}
 
 			throw e
-		} finally {
-			client.release()
 		}
 	}
 
@@ -238,6 +337,7 @@ export class LDSSource {
 	}
 }
 
+// duplicated from sql
 function getQueueNameFromDeviceId(deviceId: string): string {
 	return `postg_tmp_sub_${deviceId}`
 }
