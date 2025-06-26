@@ -57,9 +57,13 @@ CREATE TABLE app.contacts (
 );
 ALTER TABLE app.contacts REPLICA IDENTITY FULL;
 
+comment on column app.contacts.phone_number is $$
+@behaviour +filterBy
+$$;
+
 -- remove unnecessary constraints & info to be exposed on the graphQL API
 comment on table app.contacts is $$
-@foreignConnectionFieldName tags
+@behaviour connection:*:filter
 $$;
 
 -- Trigger to set updated_at

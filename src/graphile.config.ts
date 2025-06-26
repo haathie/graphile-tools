@@ -5,7 +5,7 @@ import { makePgService } from 'postgraphile/adaptors/pg'
 import { SubscriptionPlugin } from 'postgraphile/graphile-build'
 // The standard base preset to use, includes the main PostGraphile features
 import { PostGraphileAmberPreset } from 'postgraphile/presets/amber'
-import 'postgraphile'
+import { FancyConditionsPlugin } from './plugin/fancy-conditions/index.ts'
 import { FancyMutationsPlugin } from './plugin/fancy-mutations/index.ts'
 import { ReasonableLimitsPlugin } from './plugin/reasonable-limits.ts'
 import { SubscriptionsPlugin } from './plugin/subscriptions/index.ts'
@@ -19,7 +19,8 @@ const preset: GraphileConfig.Preset = {
 		SubscriptionPlugin,
 		ReasonableLimitsPlugin,
 		FancyMutationsPlugin,
-		SubscriptionsPlugin
+		SubscriptionsPlugin,
+		FancyConditionsPlugin,
 	],
 	pgServices: [
 		/* list of PG database configurations, e.g.: */

@@ -5,3 +5,4 @@ TODOs:
 - advanced filtering plugin
 - required limit plugin ✅
 - subscriptions ✅
+- rate limits 
