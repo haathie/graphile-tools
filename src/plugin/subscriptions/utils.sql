@@ -64,6 +64,10 @@ CREATE TABLE IF NOT EXISTS postgraphile_meta.subscriptions (
 	-- conditions_params = ARRAY['123']
 	conditions_sql TEXT,
 	conditions_params TEXT[],
+	-- if set, then this subscription will only receive changes
+	-- where the diff between the row_after and row_before
+	-- has at least one of the fields in the diff_only_fields array
+	diff_only_fields TEXT[],
 	-- if temporary, then the subscription will be removed
 	-- when the connection closes
 	is_temporary BOOLEAN NOT NULL DEFAULT TRUE,
@@ -213,6 +217,15 @@ BEGIN
 				AND (
 					s.conditions_sql IS NULL
 					OR postgraphile_meta.should_subscription_recv_change(s, cs)
+				)
+				AND (
+					s.diff_only_fields IS NULL
+					OR (
+						cs.diff IS NOT NULL
+						-- if diff_only_fields is not null, then we check if the diff
+						-- has at least one of the fields in the diff_only_fields array
+						AND cs.diff ?| s.diff_only_fields
+					)
 				)
 			GROUP BY s.id
 		),

@@ -8,7 +8,8 @@ GRANT
 		additional_data,
 		conditions_sql,
 		conditions_params,
-		is_temporary
+		is_temporary,
+		diff_only_fields
 	),
 	DELETE
 ON postgraphile_meta.subscriptions TO "app_user";

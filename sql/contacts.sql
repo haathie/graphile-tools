@@ -58,8 +58,10 @@ CREATE TABLE app.contacts (
 ALTER TABLE app.contacts REPLICA IDENTITY FULL;
 
 comment on table app.contacts is $$
-@foreignKey (id) references app.contacts_search (id)
-@ref search via:(id)->app.contacts_search(id) singular behavior:searchable
+@foreignKey (id) references app.contacts_search_view (id)
+@ref search via:(id)->app.contacts_search_view(id) singular behavior:searchable
+
+@behaviour +subscribable
 $$;
 
 -- Trigger to set updated_at

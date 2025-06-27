@@ -8,7 +8,7 @@ type LDSSourceOptions = {
 	deviceId: string
 
 	slotName?: string
-	tablePattern?: string
+	tablePatterns?: string[]
 	sleepDuration?: number
 }
 
@@ -36,6 +36,7 @@ export type CreateSubscriptionOpts = {
 	conditionsParams?: any[]
 	additionalData?: { [_: string]: unknown }
 	isTemporary?: boolean
+	diffOnlyFields?: string[]
 }
 
 type DataMap = { [_: string]: PgChangeData[] }
@@ -44,7 +45,7 @@ export class LDSSource {
 
 	slotName: string
 	deviceId: string
-	tablePattern: string
+	tablePatterns: string[]
 	chunkSize = 500
 	sleepDuration: number
 
@@ -60,12 +61,12 @@ export class LDSSource {
 		pool,
 		deviceId,
 		slotName = 'postgraphile',
-		tablePattern = '*.*',
+		tablePatterns = ['*.*'],
 		sleepDuration = 500
 	}: LDSSourceOptions) {
 		this.deviceId = deviceId
 		this.slotName = slotName
-		this.tablePattern = tablePattern
+		this.tablePatterns = tablePatterns
 		this.sleepDuration = sleepDuration
 		this.#pool = pool
 		this.#pgmb = new PGMBClient<DataMap>({
@@ -119,6 +120,7 @@ export class LDSSource {
 			type,
 			additionalData = {},
 			isTemporary = true,
+			diffOnlyFields,
 		}: CreateSubscriptionOpts,
 	) {
 		const values: string[] = []
@@ -153,6 +155,13 @@ export class LDSSource {
 			values.push('DEFAULT')
 		}
 
+		if(diffOnlyFields && diffOnlyFields.length > 0) {
+			params.push(diffOnlyFields)
+			values.push(`$${params.length}::varchar[]`)
+		} else {
+			values.push('DEFAULT')
+		}
+
 		params.push(isTemporary)
 		values.push(`$${params.length}::boolean`)
 
@@ -166,6 +175,7 @@ export class LDSSource {
 			topic,
 			conditions_sql,
 			conditions_params,
+			diff_only_fields,
 			is_temporary,
 			type,
 			additional_data
@@ -247,7 +257,7 @@ export class LDSSource {
 			`SELECT FROM postgraphile_meta.send_changes_to_subscriptions(
 				$1, NULL, $2, 'add-tables', $3
 			)`,
-			[this.slotName, this.chunkSize, this.tablePattern]
+			[this.slotName, this.chunkSize, this.tablePatterns.join(',')]
 		)
 	}
 

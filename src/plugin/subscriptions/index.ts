@@ -1,8 +1,8 @@
 import { hostname } from 'os'
 import { Pool } from 'pg'
 import { type PgCodecWithAttributes, type PgResource, type PgResourceUnique } from 'postgraphile/@dataplan/pg'
-import { type FieldPlanResolver, listen, loadMany, Step } from 'postgraphile/grafast'
-import { type GraphQLFieldConfig, GraphQLList, GraphQLNonNull, GraphQLObjectType, type GraphQLObjectTypeConfig } from 'postgraphile/graphql'
+import { AccessStep, type FieldPlanResolver, loadMany, Step } from 'postgraphile/grafast'
+import { type GraphQLFieldConfig, type GraphQLFieldExtensions, GraphQLList, GraphQLNonNull, GraphQLObjectType, type GraphQLObjectTypeConfig } from 'postgraphile/graphql'
 import { sql } from 'postgraphile/pg-sql2'
 import { getInputConditionForResource, getRelationFieldName } from '../fancy-mutations/utils.ts'
 import { CreateSubscriptionStep } from './CreateSubscriptionStep.ts'
@@ -15,7 +15,7 @@ type Hook = NonNullable<
 	NonNullable<
 		GraphileConfig.Plugin['schema']
 	>['hooks']
->['GraphQLSchema']
+>['GraphQLObjectType_fields']
 
 type PlanResolver = FieldPlanResolver<any, any, any>
 
@@ -28,17 +28,23 @@ declare global {
 			}
 		}
 	}
+
+	namespace GraphileBuild {
+		interface BehaviorStrings {
+			'subscribable': true
+		}
+	}
 }
 
 let subSrc: LDSSource
 
-const graphQLSchemaHook: Hook = (config, build) => {
-	// todo: use behaviours to determine this
-	subSrc.tablePattern = 'app.*'
+const graphQLSchemaHook: Hook = (subFields, build, ctx) => {
+	if(!ctx.scope.isRootSubscription) {
+		return subFields
+	}
 
+	const { allPgCodecs, inflection, behavior } = build
 	const subs: GraphQLObjectTypeConfig<any, any>['fields'] = {}
-	const { allPgCodecs, inflection } = build
-	const existingFields = config.subscription?.getFields()
 
 	for(const _codec of allPgCodecs) {
 		if(!_codec.extensions?.isTableLike || !_codec.attributes) {
@@ -47,6 +53,17 @@ const graphQLSchemaHook: Hook = (config, build) => {
 
 		const codec = _codec as PgCodecWithAttributes
 		const resource = build.pgTableResource(codec) as _PgResource
+		if(!behavior.pgCodecMatches(codec, 'subscribable')) {
+			continue // not subscribable
+		}
+
+		const pgInfo = codec.extensions?.pg
+		if(!pgInfo) {
+			continue // no pg info, cannot subscribe
+		}
+
+		subSrc.tablePatterns.push(`${pgInfo.schemaName}.${pgInfo.name}`)
+
 		const model = build
 			.getGraphQLTypeByPgCodec(codec, 'output') as GraphQLObjectType
 		if(!model) {
@@ -65,6 +82,7 @@ const graphQLSchemaHook: Hook = (config, build) => {
 
 		const pureType = getPureType(resource, model)
 		const partialType = getPartialType(pureType)
+
 		const createdEvName = inflection.camelCase(
 			inflection.pluralize(`created_${model.name}`)
 		)
@@ -111,7 +129,7 @@ const graphQLSchemaHook: Hook = (config, build) => {
 			fields: {
 				key: { type: new GraphQLNonNull(pkType) },
 				changes: { type: new GraphQLNonNull(partialType) }
-			}
+			},
 		})
 
 		subs[updatedEvName] = {
@@ -130,14 +148,9 @@ const graphQLSchemaHook: Hook = (config, build) => {
 		}
 	}
 
-	const newSubs = new GraphQLObjectType({ name: 'Subscriptions', fields: subs })
-	if(existingFields) {
-		Object.assign(existingFields, newSubs.getFields())
-	} else {
-		config.subscription = newSubs
-	}
+	Object.assign(subFields, subs)
 
-	return config
+	return subFields
 
 	function getPkType(resource: _PgResource, ogModel: GraphQLObjectType) {
 		const pk = resource.uniques.find(u => u.isPrimary)
@@ -181,6 +194,7 @@ const graphQLSchemaHook: Hook = (config, build) => {
 		const ogFields = ogModel.getFields()
 		const relationFieldNames = Object.keys(resource.getRelations())
 			.map(name => getRelationFieldName(name, resource, build))
+		const fieldToAttrMap = buildFieldToAttrMap(resource)
 
 		const newFields = Object.entries(ogFields)
 			.reduce((map, [fieldName, field]) => {
@@ -190,7 +204,14 @@ const graphQLSchemaHook: Hook = (config, build) => {
 				}
 
 				const { type, extensions } = field
-				map[fieldName] = { type, extensions }
+				map[fieldName] = {
+					type,
+					extensions: wrapWithSetAccess(
+						extensions,
+						fieldToAttrMap[fieldName],
+						fieldName
+					)
+				}
 				return map
 			}, {} as { [fieldName: string]: GraphQLFieldConfig<any, any> })
 		return new GraphQLObjectType({ name: typeName, fields: newFields })
@@ -209,6 +230,52 @@ const graphQLSchemaHook: Hook = (config, build) => {
 				return map
 			}, {} as { [fieldName: string]: GraphQLFieldConfig<any, any> })
 		})
+	}
+
+	function buildFieldToAttrMap(resource: _PgResource) {
+		const map: Record<string, string> = {}
+		for(const attrName in resource.codec.attributes) {
+			const fieldName = inflection.attribute({
+				codec: resource.codec,
+				attributeName: attrName
+			})
+			map[fieldName] = attrName
+		}
+
+		return map
+	}
+}
+
+function wrapWithSetAccess(
+	extensions: GraphQLFieldExtensions<any, any> | undefined,
+	attributeName: string,
+	fieldName: string
+): GraphQLFieldExtensions<any, any> {
+	const ogPlan = extensions?.grafast?.plan
+	return {
+		grafast: {
+			...extensions?.grafast,
+			plan: (parent: Step, args, info) => {
+				const steps = parent.operationPlan
+					.getStepsByStepClass(CreateSubscriptionStep)
+				for(const step of steps) {
+					step.diffOnlyFields.add(attributeName)
+				}
+
+				if(ogPlan) {
+					return ogPlan(parent, args, info)
+				}
+
+				if(!(parent instanceof AccessStep)) {
+					throw new Error(
+						'Expected parent to be an AccessStep, but got: ' +
+						`${parent.constructor.name} for field ${fieldName}`
+					)
+				}
+
+				return parent.get(fieldName)
+			}
+		}
 	}
 }
 
@@ -298,7 +365,7 @@ export const SubscriptionsPlugin: GraphileConfig.Plugin = {
 				subSrc = new LDSSource({
 					pool: superuserPool,
 					// will populate later
-					tablePattern: '',
+					tablePatterns: [],
 					deviceId: deviceId,
 				})
 				await subSrc.listen()
@@ -315,10 +382,7 @@ export const SubscriptionsPlugin: GraphileConfig.Plugin = {
 	},
 	schema: {
 		hooks: {
-			GraphQLSchema: graphQLSchemaHook,
-			// 'GraphQLObjectType_fields_field'(field, build, ctx) {
-
-			// }
+			'GraphQLObjectType_fields': graphQLSchemaHook,
 		}
 	},
 }

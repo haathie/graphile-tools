@@ -14,15 +14,19 @@ export class CreateSubscriptionStep extends Step<any> {
 	#whereBuilderDepId: number
 	#inputArgsDepId: number
 
+	diffOnlyFields = new Set<string>()
+
 	constructor(
 		resource: PgResource,
 		subSrc: LDSSource,
 		kind: PgChangeOp,
 		conditionWhereBuilder: PgWhereBuilder,
-		inputArgs: Step<any>
+		inputArgs: Step<any>,
+		...moreSteps: Step<any>[]
 	) {
 		super()
 		this.isSyncAndSafe = false
+		this.hasSideEffects = true
 
 		this.#resource = resource
 		this.#subSrc = subSrc
@@ -31,6 +35,9 @@ export class CreateSubscriptionStep extends Step<any> {
 		this.#contextDepId = this.addDependency(resource.executor.context())
 		this.#whereBuilderDepId = this.addDependency(conditionWhereBuilder)
 		this.#inputArgsDepId = this.addDependency(inputArgs)
+		for(const step of moreSteps) {
+			this.addDependency(step)
+		}
 	}
 
 	execute({ indexMap, values, stream }: ExecutionDetails): ExecutionResults<any> {
@@ -74,7 +81,10 @@ export class CreateSubscriptionStep extends Step<any> {
 					type: 'websocket',
 					additionalData: {
 						inputCondition: args?.condition,
-					}
+					},
+					diffOnlyFields: this.#kind === 'update'
+						? Array.from(this.diffOnlyFields)
+						: undefined,
 				}
 			)
 
