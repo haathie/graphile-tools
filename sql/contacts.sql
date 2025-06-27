@@ -57,13 +57,9 @@ CREATE TABLE app.contacts (
 );
 ALTER TABLE app.contacts REPLICA IDENTITY FULL;
 
-comment on column app.contacts.phone_number is $$
-@behaviour +filterBy
-$$;
-
--- remove unnecessary constraints & info to be exposed on the graphQL API
 comment on table app.contacts is $$
-@behaviour connection:*:filter
+@foreignKey (id) references app.contacts_search (id)
+@ref search via:(id)->app.contacts_search(id) singular behavior:searchable
 $$;
 
 -- Trigger to set updated_at
@@ -197,38 +193,54 @@ WITH CHECK (
 	)
 );
 
--- CREATE TYPE app.tag_info AS (
--- 	id VARCHAR(24),
--- 	name VARCHAR(64),
--- 	added_at TIMESTAMPTZ
--- );
+-- add MV for search -----------
 
--- CREATE MATERIALIZED VIEW app.contacts_full_m AS (
--- 	SELECT
--- 		c.*,
--- 		ARRAY_REMOVE(
--- 			ARRAY_AGG((ct.tag_id, t.name, ct.created_at)::app.tag_info),
--- 			-- removes NULL values from the array
--- 			(NULL,NULL,NULL)::app.tag_info
--- 		) AS tags
--- 	FROM app.contacts c
--- 	LEFT JOIN app.contact_tags ct ON c.id = ct.contact_id
--- 	LEFT JOIN app.tags t ON t.id = ct.tag_id
--- 	GROUP BY c.id
--- );
--- -- indices for faster access
--- CREATE INDEX ON app.contacts_full_m (org_id, id);
+CREATE MATERIALIZED VIEW app.contacts_search AS (
+	SELECT
+		c.id,
+		ARRAY_PREPEND(c.name, c.platform_names) AS names,
+		c.org_id,
+		c.created_at,
+		ARRAY_AGG(
+			jsonb_object(
+				ARRAY['id', 'name', 'added_at']::varchar[],
+				ARRAY[ct.tag_id, t.name, ct.created_at]::varchar[]
+			)
+		) AS tags
+	FROM app.contacts c
+	LEFT JOIN app.contact_tags ct ON c.id = ct.contact_id
+	LEFT JOIN app.tags t ON t.id = ct.tag_id
+	GROUP BY c.id
+);
 
--- CREATE VIEW app.contacts_full AS (
--- 	SELECT * FROM app.contacts_full_m
--- 	WHERE org_id = current_setting('app.org_id')
--- );
--- COMMENT ON VIEW app.contacts_full is $$
--- @name contacts
--- @primaryKey id
--- $$;
--- COMMENT ON COLUMN app.contacts_full.id is $$
--- @behaviour orderBy
--- $$;
+-- search index for contacts_search
+CREATE EXTENSION IF NOT EXISTS pg_search;
 
--- GRANT SELECT ON app.contacts_full TO "app_user";
+CREATE INDEX IF NOT EXISTS
+	contacts_search_idx ON app.contacts_search
+	USING bm25(id, org_id, names, created_at, tags)
+	WITH (
+		key_field='id',
+		text_fields='{
+			"org_id": {
+				"fast":true,
+				"tokenizer": {"type": "keyword"},
+				"record": "basic"
+			},
+			"names": {
+				"fast":true,
+				"tokenizer": {"type": "default"},
+				"record": "basic"
+			}
+		}',
+		json_fields='{
+			"tags": {
+				"fast":true,
+				"tokenizer": {"type": "keyword"},
+				"record": "basic"
+			}
+		}',
+		datetime_fields='{
+			"created_at": {}
+		}'
+	);

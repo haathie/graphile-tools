@@ -1,7 +1,8 @@
 import { type PgCodecWithAttributes, PgResource, PgSelectStep } from 'postgraphile/@dataplan/pg'
 import { type FieldPlanResolver, lambda, Step } from 'postgraphile/grafast'
-import { type GraphQLFieldConfig, GraphQLInputObjectType, GraphQLInt, GraphQLList, GraphQLNonNull, GraphQLObjectType } from 'postgraphile/graphql'
+import { type GraphQLFieldConfig, GraphQLInt, GraphQLList, GraphQLNonNull, GraphQLObjectType } from 'postgraphile/graphql'
 import { PgSelectAndModify } from './PgSelectAndModify.js'
+import { getInputConditionForResource } from './utils.ts'
 
 type CreateMutationOpts = {
 	table: PgResource<string, PgCodecWithAttributes>
@@ -34,21 +35,10 @@ export function createDeleteObject(
 	}
 
 	const baseName = inflection.pluralize(`delete_${table.name}`)
-	const queryType = build.getTypeByName('Query') as GraphQLObjectType
-	if(!queryType) {
+	const conditionArg = getInputConditionForResource(table, build)
+	if(!conditionArg) {
 		return
 	}
-
-	const queryFieldName = inflection
-		.customQueryConnectionField({ resource: table })
-	const queryField = queryType.getFields()[queryFieldName]
-	if(!queryField) {
-		return
-	}
-
-	const conditionArg = queryField.args
-		.find(a => a.name === 'condition')
-		?.type as GraphQLInputObjectType
 
 	return {
 		description: `Delete one or more ${table.name} items`,

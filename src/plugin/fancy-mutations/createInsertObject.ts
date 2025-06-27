@@ -202,6 +202,10 @@ function getFieldsForInsert(
 			const _inputObj = build.getGraphQLTypeByPgCodec(
 				resource.codec, 'input'
 			) as GraphQLInputObjectType
+			if(!_inputObj) {
+				return
+			}
+
 			return {
 				name: inputItemName,
 				fields: { ..._inputObj.getFields() },
@@ -217,11 +221,15 @@ function buildFieldsWithRelations(
 		path: PgResource<string, PgCodecWithAttributes>,
 		relationPath: string[],
 		resource: PgResource
-	) => GraphQLInputObjectTypeConfig,
+	) => GraphQLInputObjectTypeConfig | undefined,
 	path: string[] = []
 ) {
 	const { inflection, pgTableResource } = build
 	const obj = getInputObject(table, [], table)
+	if(!obj) {
+		return {}
+	}
+
 	const fields = obj.fields as { [_: string]: GraphQLInputFieldConfig }
 
 	for(const [
@@ -247,6 +255,10 @@ function buildFieldsWithRelations(
 		const relName = getRelationFieldName(relationName, table, build)
 		const newPath = [...path, relationName]
 		const inputObjConfig = getInputObject(table, newPath, remoteResource)
+		if(!inputObjConfig) {
+			continue
+		}
+
 		inputObjConfig.fields = buildFieldsWithRelations(
 			relationTable, build, getInputObject, newPath
 		)

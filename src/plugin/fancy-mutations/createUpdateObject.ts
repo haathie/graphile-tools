@@ -2,6 +2,7 @@ import { type PgCodecWithAttributes, PgResource, PgSelectStep } from 'postgraphi
 import { type FieldPlanResolver, lambda, Step } from 'postgraphile/grafast'
 import { type GraphQLFieldConfig, GraphQLInputObjectType, GraphQLInt, GraphQLList, GraphQLNonNull, GraphQLObjectType } from 'postgraphile/graphql'
 import { PgSelectAndModify } from './PgSelectAndModify.js'
+import { getInputConditionForResource } from './utils.ts'
 
 type CreateMutationOpts = {
 	table: PgResource<string, PgCodecWithAttributes>
@@ -34,27 +35,13 @@ export function createUpdateObject(
 	}
 
 	const baseName = inflection.pluralize(`update_${table.name}`)
-	const queryType = build.getTypeByName('Query') as GraphQLObjectType
-	if(!queryType) {
-		return
-	}
-
 	const patchType = build
 		.getGraphQLTypeByPgCodec(codec, 'patch') as GraphQLInputObjectType
 	if(!patchType) {
 		return
 	}
 
-	const queryFieldName = inflection
-		.customQueryConnectionField({ resource: table })
-	const queryField = queryType.getFields()[queryFieldName]
-	if(!queryField) {
-		return
-	}
-
-	const conditionArg = queryField.args
-		.find(a => a.name === 'condition')
-		?.type as GraphQLInputObjectType
+	const conditionArg = getInputConditionForResource(table, build)
 	if(!conditionArg) {
 		return
 	}

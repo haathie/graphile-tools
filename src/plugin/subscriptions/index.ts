@@ -2,9 +2,9 @@ import { hostname } from 'os'
 import { Pool } from 'pg'
 import { type PgCodecWithAttributes, type PgResource, type PgResourceUnique, withPgClientTransaction } from 'postgraphile/@dataplan/pg'
 import { type FieldPlanResolver, lambda, listen, loadMany, Step } from 'postgraphile/grafast'
-import { type GraphQLFieldConfig, GraphQLInputObjectType, GraphQLList, GraphQLNonNull, GraphQLObjectType, type GraphQLObjectTypeConfig } from 'postgraphile/graphql'
+import { type GraphQLFieldConfig, GraphQLList, GraphQLNonNull, GraphQLObjectType, type GraphQLObjectTypeConfig } from 'postgraphile/graphql'
 import { type SQL, sql } from 'postgraphile/pg-sql2'
-import { getRelationFieldName } from '../fancy-mutations/utils.ts'
+import { getInputConditionForResource, getRelationFieldName } from '../fancy-mutations/utils.ts'
 import { LDSSource, type PgChangeData, type PgChangeOp } from './lds.ts'
 import { PgWhereBuilder } from './PgWhereBuilder.ts'
 
@@ -57,21 +57,7 @@ const graphQLSchemaHook: Hook = (config, build) => {
 			continue // no model, cannot subscribe
 		}
 
-		const queryType = build.getTypeByName('Query') as GraphQLObjectType
-		if(!queryType) {
-			continue
-		}
-
-		const queryFieldName = inflection
-			.customQueryConnectionField({ resource })
-		const queryField = queryType.getFields()[queryFieldName]
-		if(!queryField) {
-			continue
-		}
-
-		const conditionArg = queryField.args
-			.find(a => a.name === 'condition')
-			?.type as GraphQLInputObjectType
+		const conditionArg = getInputConditionForResource(resource, build)
 		if(!conditionArg) {
 			continue
 		}

@@ -1,4 +1,5 @@
 import { type PgCodecWithAttributes, PgResource } from 'postgraphile/@dataplan/pg'
+import { GraphQLInputObjectType, GraphQLObjectType } from 'postgraphile/graphql'
 import type { PGEntityCtx } from './pg-utils.ts'
 
 type _PgResource = PgResource<string, PgCodecWithAttributes>
@@ -257,4 +258,29 @@ export function getRelationFieldName(
 		relationName,
 		registry: table.registry
 	})
+}
+
+export function getInputConditionForResource(
+	resource: _PgResource,
+	{ inflection, getTypeByName }: GraphileBuild.Build,
+): GraphQLInputObjectType | undefined {
+	const queryType = getTypeByName('Query')
+	if(!queryType || !(queryType instanceof GraphQLObjectType)) {
+		return
+	}
+
+	const resourceQueryFieldName = inflection.allRowsConnection(resource)
+	const queryField = queryType.getFields()[resourceQueryFieldName]
+	if(!queryField) {
+		return
+	}
+
+	const conditionArg = queryField.args
+		.find(a => a.name === 'condition')
+		?.type as GraphQLInputObjectType
+	if(!conditionArg) {
+		return
+	}
+
+	return conditionArg
 }

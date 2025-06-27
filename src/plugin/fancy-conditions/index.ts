@@ -1,13 +1,23 @@
-import { type PgCodecAttribute, type PgCodecWithAttributes } from 'postgraphile/@dataplan/pg'
+import { type PgCodecAttribute, type PgCodecWithAttributes, PgCondition } from 'postgraphile/@dataplan/pg'
 import { type InputObjectFieldApplyResolver } from 'postgraphile/grafast'
 import { type GraphQLInputFieldConfig, GraphQLInputObjectType, type GraphQLInputType } from 'postgraphile/graphql'
-import { FILTER_TYPES_MAP, type FilterType } from './filters.ts'
+import { type SQL } from 'postgraphile/pg-sql2'
+import { getInputConditionForResource } from '../fancy-mutations/utils.ts'
+import { FILTER_METHODS, FILTER_TYPES_MAP, type FilterMethod, type FilterType } from './filters.ts'
+import { PgInCondition } from './PgInCondition.ts'
 
 type Hook = NonNullable<
 	NonNullable<
 		GraphileConfig.Plugin['schema']
 	>['hooks']
 >['GraphQLInputObjectType_fields']
+
+type FilterInfo = {
+	types: FilterType[]
+	method: FilterMethod | undefined
+}
+
+const inputConditionTypes: { [key: string]: GraphQLInputType } = {}
 
 const hook: Hook = (fieldMap, build, ctx) => {
 	const { behavior, inflection } = build
@@ -17,26 +27,31 @@ const hook: Hook = (fieldMap, build, ctx) => {
 	}
 
 	const pgCodec = _codec as PgCodecWithAttributes
+	const pgResource = build.pgTableResource(pgCodec)!
+
 	const typeName = build.getGraphQLTypeNameByPgCodec(pgCodec, 'output')
-	const inputConditionTypes: { [key: string]: GraphQLInputType } = {}
 
 	for(const attrName in pgCodec.attributes) {
-		const applicableFilters: FilterType[] = []
+		const applicableTypes: FilterType[] = []
+		const method = FILTER_METHODS.find(m => (
+			behavior.pgCodecAttributeMatches([pgCodec, attrName], `filterMethod:${m}`)
+		))
 		for(const _filterType in FILTER_TYPES_MAP) {
 			const filterType = _filterType as FilterType
 			if(
 				behavior
 					.pgCodecAttributeMatches([pgCodec, attrName], `filterType:${filterType}`)
 			) {
-				applicableFilters.push(filterType)
+				applicableTypes.push(filterType)
 			}
 		}
 
-		if(!applicableFilters.length) {
+		if(!applicableTypes.length) {
 			continue
 		}
 
-		const field = addConditionField(attrName, applicableFilters)
+		const info: FilterInfo = { types: applicableTypes, method }
+		const field = addConditionField(attrName, info)
 		if(!field) {
 			continue
 		}
@@ -46,15 +61,45 @@ const hook: Hook = (fieldMap, build, ctx) => {
 		fieldMap[fieldName] = field
 	}
 
+	// add queries via refs
+	for(const [refName, { paths }] of Object.entries(pgCodec.refs || {})) {
+		if(
+			!behavior.pgCodecRefMatches([pgCodec, refName], 'searchable')
+		) {
+			continue
+		}
+
+		if(!paths.length) {
+			throw new Error(
+				`Ref ${refName} on codec ${pgCodec.name} has no paths defined.`
+			)
+		}
+
+		if(paths.length > 1) {
+			throw new Error(
+				'Refs w multiple paths are not supported yet.'
+			)
+		}
+
+		const relationName = paths[0][0].relationName
+		const field = buildRelationSearch(relationName)
+		if(!field) {
+			continue
+		}
+
+		const fieldName = inflection.camelCase(refName)
+		fieldMap[fieldName] = field
+	}
+
 	return fieldMap
 
 	function addConditionField(
-		attrName: string, filters: FilterType[]
+		attrName: string, { types: filterTypes, method }: FilterInfo
 	): GraphQLInputFieldConfig | undefined {
 		const attr = pgCodec.attributes[attrName]
-		const { codec: attrCodec } = attr
+		const attrSingularCodec = attr.codec.arrayOfCodec || attr.codec
 		const graphQlType = build
-			.getGraphQLTypeByPgCodec(attrCodec, 'input') as GraphQLInputType
+			.getGraphQLTypeByPgCodec(attrSingularCodec, 'input') as GraphQLInputType
 		if(!graphQlType) {
 			return
 		}
@@ -65,9 +110,10 @@ const hook: Hook = (fieldMap, build, ctx) => {
 				name: inflection.upperCamelCase(`${typeName}_${attrName}_condition`),
 				description: `Conditions for filtering by ${attrName}`,
 				isOneOf: true,
-				fields: filters.reduce((fields, filterType) => {
-					const condType
-						= buildConditionField(attrName, attr, filterType, graphQlType)
+				fields: filterTypes.reduce((fields, filterType) => {
+					const condType = buildConditionField(
+						attrName, attr, filterType, method, graphQlType
+					)
 					fields[filterType] = condType
 					return fields
 				}, { } as Record<string, GraphQLInputFieldConfig>),
@@ -79,18 +125,62 @@ const hook: Hook = (fieldMap, build, ctx) => {
 		attrName: string,
 		attr: PgCodecAttribute,
 		filter: FilterType,
+		method: FilterMethod | undefined,
 		graphQlType: GraphQLInputType
 	): GraphQLInputFieldConfig {
-		const { buildType, buildApply } = FILTER_TYPES_MAP[filter]
+		const { buildType, buildApplys } = FILTER_TYPES_MAP[filter]
 		let builtType = buildType(graphQlType, inflection)
-		if('name' in builtType && inputConditionTypes[builtType.name]) {
-			// If the type is already built, reuse it
-			builtType = inputConditionTypes[builtType.name]
+		if('name' in builtType) {
+			if(inputConditionTypes[builtType.name]) {
+				// If the type is already built, reuse it
+				builtType = inputConditionTypes[builtType.name]
+			} else {
+				inputConditionTypes[builtType.name] = builtType
+			}
+		}
+
+		const buildApply = buildApplys[method || 'default']
+		if(!buildApply) {
+			throw new Error(
+				`No apply builder for filter type ${filter} and method ${method}`
+			)
 		}
 
 		return {
 			type: builtType,
 			extensions: {	grafast: { apply: buildApply(attrName, attr) } }
+		}
+	}
+
+	function buildRelationSearch(
+		relationName: string
+	): GraphQLInputFieldConfig | undefined {
+		const relation = pgResource?.getRelation(relationName)
+		if(!relation) {
+			return
+		}
+
+		const rmtRrsc = relation.remoteResource
+		const rmtRrscFrom = rmtRrsc.from as SQL
+		const remoteResourceCond = getInputConditionForResource(rmtRrsc, build)
+		if(!remoteResourceCond) {
+			throw new Error('TODO')
+		}
+
+		return {
+			type: remoteResourceCond,
+			extensions: {
+				grafast: {
+					apply(target: PgCondition) {
+						const inPlan = new PgInCondition(target, {
+							subTable: rmtRrscFrom,
+							subTableMatchCols: relation.remoteAttributes,
+							matchCols: relation.localAttributes,
+						})
+						return inPlan.whereBuilder()
+					}
+				}
+			}
 		}
 	}
 }
