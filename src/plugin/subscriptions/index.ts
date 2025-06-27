@@ -1,10 +1,11 @@
 import { hostname } from 'os'
 import { Pool } from 'pg'
-import { type PgCodecWithAttributes, type PgResource, type PgResourceUnique, withPgClientTransaction } from 'postgraphile/@dataplan/pg'
-import { type FieldPlanResolver, lambda, listen, loadMany, Step } from 'postgraphile/grafast'
+import { type PgCodecWithAttributes, type PgResource, type PgResourceUnique } from 'postgraphile/@dataplan/pg'
+import { type FieldPlanResolver, listen, loadMany, Step } from 'postgraphile/grafast'
 import { type GraphQLFieldConfig, GraphQLList, GraphQLNonNull, GraphQLObjectType, type GraphQLObjectTypeConfig } from 'postgraphile/graphql'
-import { type SQL, sql } from 'postgraphile/pg-sql2'
+import { sql } from 'postgraphile/pg-sql2'
 import { getInputConditionForResource, getRelationFieldName } from '../fancy-mutations/utils.ts'
+import { CreateSubscriptionStep } from './CreateSubscriptionStep.ts'
 import { LDSSource, type PgChangeData, type PgChangeOp } from './lds.ts'
 import { PgWhereBuilder } from './PgWhereBuilder.ts'
 
@@ -227,46 +228,9 @@ function createSubscriptionPlan(
 		args.apply($whereBuilder)
 
 		const $argsRaw = args.getRaw()
-		const $sqlAndRaw = lambda([$whereBuilder, $argsRaw], ([cond, args]) => {
-			return { cond, args }
-		})
-
-		const $subId = withPgClientTransaction(resource.executor, $sqlAndRaw, async(client, { cond, args }) => {
-			const sampleJson = '{}'
-			const compiledSql = cond
-				? sql.compile(
-					sql`select 1
-						from jsonb_populate_record(
-							null::${resource.from as SQL},
-							${sql.value(sampleJson)}::jsonb
-						) ${alias} WHERE ${cond}`
-				)
-				: undefined
-			const [text, values] = subSrc.getCreateSubscriptionSql(
-				{
-					topic: {
-						schema: pgInfo.schemaName,
-						table: pgInfo.name,
-						kind
-					},
-					conditionsSql: compiledSql?.text,
-					// 1st param is just a placeholder
-					conditionsParams: compiledSql?.values?.slice(1),
-					type: 'websocket',
-					additionalData: {
-						inputCondition: args?.condition,
-					}
-				}
-			)
-			const { rows: [row] } = await client
-				.query<{ id: string, topic: string }>({ text, values })
-
-			console.log(`created sub ${row.id}, on topic ${row.topic}`)
-
-			return row.id
-		})
-
-		return listen(subSrc, $subId)
+		return new CreateSubscriptionStep(
+			resource, subSrc, kind, $whereBuilder, $argsRaw
+		)
 	}
 
 	return plan
@@ -351,7 +315,10 @@ export const SubscriptionsPlugin: GraphileConfig.Plugin = {
 	},
 	schema: {
 		hooks: {
-			GraphQLSchema: graphQLSchemaHook
+			GraphQLSchema: graphQLSchemaHook,
+			// 'GraphQLObjectType_fields_field'(field, build, ctx) {
+
+			// }
 		}
 	},
 }
