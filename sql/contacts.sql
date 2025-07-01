@@ -7,6 +7,11 @@ GRANT CONNECT, TEMPORARY ON DATABASE "im-contacts" TO "app_user";
 -- Create custom types first
 CREATE TYPE app.contact_type AS ENUM ('individual', 'group', 'channel', 'post');
 
+CREATE TYPE app.contact_img_info AS (
+	url VARCHAR(255),
+	fetched_at TIMESTAMPTZ
+);
+
 -- Create a sequential ID
 -- Eg. cnt_12910232939291212345
 CREATE OR REPLACE FUNCTION app.create_object_id(
@@ -45,22 +50,33 @@ CREATE TABLE app.contacts (
 	updated_at TIMESTAMPTZ DEFAULT NOW(),
 	phone_number BIGINT,
 	email VARCHAR(128),
-	img JSONB,
+	full_img app.contact_img_info,
 	assignee VARCHAR(64),
 	assigned_by VARCHAR(64),
 	assigned_at TIMESTAMPTZ,
 	first_assigned_at TIMESTAMPTZ,
 	messages_sent INTEGER NOT NULL DEFAULT 0,
 	messages_received INTEGER NOT NULL DEFAULT 0,
+	-- denormalized fields
+	-- these fields are used for search and should be updated via triggers
+	-- or be generated fields
+	search TEXT[] GENERATED ALWAYS AS (
+		array_cat(
+			ARRAY[
+				COALESCE(name, ''),
+				COALESCE(phone_number::TEXT, ''),
+				COALESCE(email, '')
+			],
+			platform_names
+		)
+	) STORED,
+	tags JSONB DEFAULT '{}',
 	UNIQUE (org_id, phone_number),
 	UNIQUE (org_id, email)
 );
 ALTER TABLE app.contacts REPLICA IDENTITY FULL;
 
 comment on table app.contacts is $$
-@foreignKey (id) references app.contacts_search_view (id)
-@ref search via:(id)->app.contacts_search_view(id) singular behavior:searchable
-
 @behaviour +subscribable
 $$;
 
@@ -113,7 +129,24 @@ CREATE TRIGGER handle_contact_assignment_trigger
 -- Enable Row Level Security on all tables
 ALTER TABLE app.contacts ENABLE ROW LEVEL SECURITY;
 GRANT
-  SELECT,
+  SELECT(
+		id,
+		org_id,
+		type,
+		name,
+		platform_names,
+		created_at,
+		created_by,
+		updated_at,
+		phone_number,
+		full_img,
+		assignee,
+		assigned_by,
+		assigned_at,
+		first_assigned_at,
+		messages_sent,
+		messages_received
+	),
 	INSERT(name, platform_names, phone_number, email, assignee),
 	UPDATE(name, platform_names, phone_number, email, assignee),
 	DELETE
@@ -182,45 +215,77 @@ ON app.contact_tags TO "app_user";
 -- Create RLS policies for contact_tags table
 CREATE POLICY contact_tags_team_isolation ON app.contact_tags
 FOR ALL TO "app_user"
-USING (
-	contact_id IN (
-		SELECT id FROM app.contacts
-		WHERE org_id = current_setting('app.org_id')
-	)
-)
-WITH CHECK (
-	contact_id IN (
-		SELECT id FROM app.contacts
-		WHERE org_id = current_setting('app.org_id')
-	)
-);
+USING (TRUE)
+WITH CHECK (TRUE);
+-- USING (
+-- 	contact_id IN (
+-- 		SELECT id FROM app.contacts
+-- 		WHERE org_id = current_setting('app.org_id')
+-- 	)
+-- )
+-- WITH CHECK (
+-- 	contact_id IN (
+-- 		SELECT id FROM app.contacts
+-- 		WHERE org_id = current_setting('app.org_id')
+-- 	)
+-- );
 
--- add MV for search -----------
+-- add triggers for updating denormalized fields & create search index
 
-CREATE MATERIALIZED VIEW app.contacts_search AS (
-	SELECT
-		c.id,
-		ARRAY_PREPEND(c.name, c.platform_names) AS names,
-		c.org_id,
-		c.created_at,
-		ARRAY_AGG(
-			jsonb_object(
-				ARRAY['id', 'name', 'added_at']::varchar[],
-				ARRAY[ct.tag_id, t.name, ct.created_at]::varchar[]
-			)
-		) AS tags
-	FROM app.contacts c
-	LEFT JOIN app.contact_tags ct ON c.id = ct.contact_id
-	LEFT JOIN app.tags t ON t.id = ct.tag_id
-	GROUP BY c.id
-);
+CREATE OR REPLACE FUNCTION app.update_contact_tags()
+RETURNS TRIGGER AS $$
+BEGIN
+	IF TG_OP = 'INSERT' THEN
+		WITH updated_contacts AS (
+			SELECT
+				contact_id, 
+				jsonb_object_agg(
+					tag_id,
+					jsonb_build_object('created_at', created_at, 'created_by', created_by)
+				) as new_tags
+			FROM new_table
+			GROUP BY contact_id
+		)
+		UPDATE app.contacts c
+		SET tags = tags || new_tags
+		FROM updated_contacts ut
+		WHERE c.id = ut.contact_id;
+	ELSIF TG_OP = 'DELETE' THEN
+		WITH updated_contacts AS (
+			SELECT
+				contact_id,
+				ARRAY_AGG(tag_id) AS tags_to_remove
+			FROM old_table
+			GROUP BY contact_id
+		)
+		UPDATE app.contacts c
+		SET tags = tags - tags_to_remove
+		FROM updated_contacts ut
+		WHERE c.id = ut.contact_id;
+	END IF;
+
+	RETURN NULL;
+END
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER new_contact_tags_trigger
+	AFTER INSERT ON app.contact_tags
+	REFERENCING NEW TABLE AS new_table
+	FOR EACH STATEMENT
+	EXECUTE FUNCTION app.update_contact_tags();
+
+CREATE TRIGGER del_contact_tags_trigger
+	AFTER DELETE ON app.contact_tags
+	REFERENCING OLD TABLE AS old_table
+	FOR EACH STATEMENT
+	EXECUTE FUNCTION app.update_contact_tags();
 
 -- search index for contacts_search
 CREATE EXTENSION IF NOT EXISTS pg_search;
 
 CREATE INDEX IF NOT EXISTS
-	contacts_search_idx ON app.contacts_search
-	USING bm25(id, org_id, names, created_at, tags)
+	contacts_search_idx ON app.contacts
+	USING bm25(id, org_id, search, created_at, tags)
 	WITH (
 		key_field='id',
 		text_fields='{
@@ -229,7 +294,7 @@ CREATE INDEX IF NOT EXISTS
 				"tokenizer": {"type": "keyword"},
 				"record": "basic"
 			},
-			"names": {
+			"search": {
 				"fast":true,
 				"tokenizer": {"type": "default"},
 				"record": "basic"
