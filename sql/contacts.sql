@@ -12,6 +12,12 @@ CREATE TYPE app.contact_img_info AS (
 	fetched_at TIMESTAMPTZ
 );
 
+CREATE TYPE app.min_contact_tag AS (
+	id VARCHAR(24),
+	created_at TIMESTAMPTZ,
+	created_by VARCHAR(64)
+);
+
 -- Create a sequential ID
 -- Eg. cnt_12910232939291212345
 CREATE OR REPLACE FUNCTION app.create_object_id(
@@ -70,7 +76,7 @@ CREATE TABLE app.contacts (
 			platform_names
 		)
 	) STORED,
-	tags JSONB DEFAULT '{}',
+	tags app.min_contact_tag[] DEFAULT ARRAY[]::app.min_contact_tag[],
 	UNIQUE (org_id, phone_number),
 	UNIQUE (org_id, email)
 );
@@ -78,6 +84,22 @@ ALTER TABLE app.contacts REPLICA IDENTITY FULL;
 
 comment on table app.contacts is $$
 @behaviour +subscribable
+$$;
+
+comment on column app.contacts.created_at is $$
+@behaviour filterType:range filterMethod:paradedb
+$$;
+
+comment on column app.contacts.id is $$
+@behaviour filterType:range filterType:eq filterType:eqIn
+$$;
+
+comment on column app.contacts.search is $$
+@behaviour -select filterType:icontains filterMethod:paradedb
+$$;
+
+comment on column app.contacts.tags is $$
+@behaviour -select
 $$;
 
 -- Trigger to set updated_at
@@ -129,24 +151,7 @@ CREATE TRIGGER handle_contact_assignment_trigger
 -- Enable Row Level Security on all tables
 ALTER TABLE app.contacts ENABLE ROW LEVEL SECURITY;
 GRANT
-  SELECT(
-		id,
-		org_id,
-		type,
-		name,
-		platform_names,
-		created_at,
-		created_by,
-		updated_at,
-		phone_number,
-		full_img,
-		assignee,
-		assigned_by,
-		assigned_at,
-		first_assigned_at,
-		messages_sent,
-		messages_received
-	),
+  SELECT,
 	INSERT(name, platform_names, phone_number, email, assignee),
 	UPDATE(name, platform_names, phone_number, email, assignee),
 	DELETE
@@ -160,6 +165,62 @@ USING (
 WITH CHECK (
 	org_id = current_setting('app.org_id')
 );
+
+-- Create a search index on the contacts table
+
+-- search index for contacts_search
+CREATE EXTENSION IF NOT EXISTS pg_search;
+
+-- Converts app.min_contact_tag[] to a map type
+-- { [tagId: string]: { created_at: string, created_by: string } }
+CREATE FUNCTION app.convert_to_map(tags app.min_contact_tag[])
+RETURNS JSONB AS $$
+BEGIN
+	RETURN jsonb_object_agg(
+		tag.id,
+		jsonb_build_object(
+			'created_at', tag.created_at,
+			'created_by', tag.created_by
+		)
+	) FROM unnest(tags) AS tag;
+END
+$$ LANGUAGE plpgsql IMMUTABLE PARALLEL SAFE;
+
+CREATE INDEX IF NOT EXISTS
+	contacts_search_idx ON app.contacts
+	USING bm25(id, org_id, search, created_at, app.convert_to_map(tags))
+	WITH (
+		key_field='id',
+		text_fields='{
+			"org_id": {
+				"fast":true,
+				"tokenizer": {"type": "keyword"},
+				"record": "basic"
+			},
+			"search": {
+				"fast":true,
+				"tokenizer": {
+					"type": "ngram",
+					"min_gram": 2,
+					"max_gram": 3,
+					"prefix_only": false
+				},
+				"record": "position"
+			}
+		}',
+		json_fields='{
+			"_pg_search_4": {
+				"fast":true,
+				"tokenizer": {"type": "keyword"},
+				"record": "basic"
+			}
+		}',
+		datetime_fields='{
+			"created_at": {}
+		}'
+	);
+
+-- Create the Tags table
 
 CREATE TABLE app.tags (
 	id VARCHAR(24) PRIMARY KEY DEFAULT app.create_object_id('tag'),
@@ -238,11 +299,10 @@ BEGIN
 	IF TG_OP = 'INSERT' THEN
 		WITH updated_contacts AS (
 			SELECT
-				contact_id, 
-				jsonb_object_agg(
-					tag_id,
-					jsonb_build_object('created_at', created_at, 'created_by', created_by)
-				) as new_tags
+				contact_id,
+				ARRAY_AGG(
+					(tag_id, created_at, created_by)::app.min_contact_tag
+				) AS new_tags
 			FROM new_table
 			GROUP BY contact_id
 		)
@@ -259,7 +319,10 @@ BEGIN
 			GROUP BY contact_id
 		)
 		UPDATE app.contacts c
-		SET tags = tags - tags_to_remove
+		SET tags = ARRAY(
+			SELECT t FROM unnest(tags) AS t
+			WHERE NOT (t.id = ANY(ut.tags_to_remove))
+		)
 		FROM updated_contacts ut
 		WHERE c.id = ut.contact_id;
 	END IF;
@@ -279,35 +342,3 @@ CREATE TRIGGER del_contact_tags_trigger
 	REFERENCING OLD TABLE AS old_table
 	FOR EACH STATEMENT
 	EXECUTE FUNCTION app.update_contact_tags();
-
--- search index for contacts_search
-CREATE EXTENSION IF NOT EXISTS pg_search;
-
-CREATE INDEX IF NOT EXISTS
-	contacts_search_idx ON app.contacts
-	USING bm25(id, org_id, search, created_at, tags)
-	WITH (
-		key_field='id',
-		text_fields='{
-			"org_id": {
-				"fast":true,
-				"tokenizer": {"type": "keyword"},
-				"record": "basic"
-			},
-			"search": {
-				"fast":true,
-				"tokenizer": {"type": "default"},
-				"record": "basic"
-			}
-		}',
-		json_fields='{
-			"tags": {
-				"fast":true,
-				"tokenizer": {"type": "keyword"},
-				"record": "basic"
-			}
-		}',
-		datetime_fields='{
-			"created_at": {}
-		}'
-	);

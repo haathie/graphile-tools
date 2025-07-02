@@ -1,10 +1,9 @@
-import { type PgCodecAttribute, type PgCodecWithAttributes, PgCondition } from 'postgraphile/@dataplan/pg'
+import { type PgCodecAttribute, type PgCodecWithAttributes, PgCondition, type PgSelectQueryBuilder, PgSelectStep } from 'postgraphile/@dataplan/pg'
 import { type InputObjectFieldApplyResolver } from 'postgraphile/grafast'
 import { type GraphQLInputFieldConfig, GraphQLInputObjectType, type GraphQLInputType } from 'postgraphile/graphql'
 import { type SQL } from 'postgraphile/pg-sql2'
 import { getInputConditionForResource } from '../fancy-mutations/utils.ts'
 import { FILTER_METHODS, FILTER_TYPES_MAP, type FilterMethod, type FilterType } from './filters.ts'
-import { PgInCondition } from './PgInCondition.ts'
 
 type Hook = NonNullable<
 	NonNullable<
@@ -164,7 +163,8 @@ const hook: Hook = (fieldMap, build, ctx) => {
 		const rmtRrscFrom = rmtRrsc.from as SQL
 		const remoteResourceCond = getInputConditionForResource(rmtRrsc, build)
 		if(!remoteResourceCond) {
-			throw new Error('TODO')
+			//throw new Error('TODO')
+			return
 		}
 
 		return {
@@ -172,17 +172,27 @@ const hook: Hook = (fieldMap, build, ctx) => {
 			extensions: {
 				grafast: {
 					apply(target: PgCondition) {
-						const inPlan = new PgInCondition(target, {
-							subTable: rmtRrscFrom,
-							subTableMatchCols: relation.remoteAttributes,
-							matchCols: relation.localAttributes,
-						})
-						return inPlan.whereBuilder()
+						const condParent = target['parent'] as PgSelectQueryBuilder
+						if(!condParent) {
+							throw new Error(
+								'Cannot apply relation search condition without a parent query builder.'
+							)
+						}
+
+						const alias = condParent.singleRelation(relationName)
+						return new PgCondition({ ...condParent, alias }, false)
 					}
 				}
 			}
 		}
 	}
+}
+
+function buildConditionFields(
+	codec: PgCodecWithAttributes,
+	build: GraphileBuild.Build,
+) {
+
 }
 
 const passThroughApply: InputObjectFieldApplyResolver = s => s
@@ -192,7 +202,28 @@ export const FancyConditionsPlugin: GraphileConfig.Plugin = {
 	version: '0.0.1',
 	schema: {
 		hooks: {
-			'GraphQLInputObjectType_fields': hook
+			'GraphQLInputObjectType_fields': hook,
+			'GraphQLObjectType_fields_field'(field, build, ctx) {
+				if(!ctx.scope.isRootQuery) {
+					return field
+				}
+
+				// const ogPlan = field.plan
+				// field.plan = (parent, args, info) => {
+				// 	const res = ogPlan!(parent, args, info)
+				// 	if(!(res instanceof ConnectionStep)) {
+				// 		return res
+				// 	}
+
+				// 	const subPlan = res.getSubplan() as PgSelectStep
+				// 	// console.log(ctx.scope.pgCodec.rela)
+				// 	const alias = subPlan.singleRelation('contactsSearchViewByMyId')
+
+				// 	return res
+				// }
+
+				return field
+			}
 		}
 	}
 }

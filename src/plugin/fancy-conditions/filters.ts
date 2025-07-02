@@ -1,11 +1,12 @@
 import { type PgCodecAttribute, PgCondition } from 'postgraphile/@dataplan/pg'
 import { type InputObjectFieldApplyResolver } from 'postgraphile/grafast'
-import { GraphQLInputObjectType, type GraphQLInputType, GraphQLList } from 'postgraphile/graphql'
+import { GraphQLInputObjectType, type GraphQLInputType, GraphQLList, GraphQLNonNull, GraphQLScalarType } from 'postgraphile/graphql'
 import { sql } from 'postgraphile/pg-sql2'
 
 export type FilterType = 'eq'
 	| 'eqIn'
 	| 'range'
+	| 'icontains'
 
 export type FilterMethod = typeof FILTER_METHODS[number]
 
@@ -28,6 +29,7 @@ interface FilterBehaviours extends
 	Record<`filterType:${FilterType}`, true>,
 	Record<`filterMethod:${FilterMethod}`, true> {
 	'searchable': true
+	'proxy': true
 }
 
 declare global {
@@ -177,6 +179,39 @@ export const FILTER_TYPES_MAP: { [K in FilterType]: FilterTypeImpl } = {
 							)
 						)	
 					`)
+				}
+			}
+		}
+	},
+	'icontains': {
+		buildType: fieldType => {
+			fieldType = fieldType instanceof GraphQLNonNull
+				? fieldType.ofType
+				: fieldType
+			if(!(fieldType instanceof GraphQLScalarType)) {
+				throw new Error('Cannot build contains condition on a non-scalar type')
+			}
+
+			return fieldType
+		},
+		buildApplys: {
+			default(attrName, attr) {
+				return (cond, input) => {
+					const id = sql`${cond.alias}.${sql.identifier(attrName)}`
+					const codec = attr.codec.arrayOfCodec || attr.codec
+					if(attr.codec.arrayOfCodec) {
+						throw new Error('TODO')
+					}
+
+					return cond.where(
+						sql`${id} ILIKE ${sql.value(`%${input}%`)}::${codec.sqlType}`
+					)
+				}
+			},
+			paradedb(attrName) {
+				return (cond, input) => {
+					const id = sql`${cond.alias}.${sql.identifier(attrName)}`
+					return cond.where(sql`${id} @@@ ${sql.value(`"${input}"`)}`)
 				}
 			}
 		}
