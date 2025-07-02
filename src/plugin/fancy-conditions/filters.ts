@@ -8,7 +8,7 @@ export type FilterType = 'eq'
 	| 'range'
 	| 'icontains'
 
-export type FilterMethod = typeof FILTER_METHODS[number]
+export type FilterMethod = 'paradedb'
 
 type ApplyBuilder = (
 	attrName: string,
@@ -37,9 +37,17 @@ declare global {
 	}
 }
 
-export const FILTER_METHODS = [
-	'paradedb'
-] as const
+type FilterMethodConfig = {
+	supportedOnSubscription: boolean
+}
+
+export const FILTER_METHODS_CONFIG: { [K in FilterMethod]: FilterMethodConfig } = {
+	'paradedb': {
+		supportedOnSubscription: false
+	}
+}
+
+export const FILTER_METHODS = Object.keys(FILTER_METHODS_CONFIG) as FilterMethod[]
 
 export const FILTER_TYPES_MAP: { [K in FilterType]: FilterTypeImpl } = {
 	'eq': {
@@ -197,14 +205,16 @@ export const FILTER_TYPES_MAP: { [K in FilterType]: FilterTypeImpl } = {
 			default(attrName, attr) {
 				return (cond, input) => {
 					const id = sql`${cond.alias}.${sql.identifier(attrName)}`
-					const codec = attr.codec.arrayOfCodec || attr.codec
 					if(attr.codec.arrayOfCodec) {
-						throw new Error('TODO')
+						return cond.where(
+							sql`EXISTS (
+								SELECT 1 FROM unnest(${id}) AS elem 
+								WHERE elem ILIKE ${sql.value(`%${input}%`)}
+							)`
+						)
 					}
 
-					return cond.where(
-						sql`${id} ILIKE ${sql.value(`%${input}%`)}::${codec.sqlType}`
-					)
+					return cond.where(sql`${id} ILIKE ${sql.value(`%${input}%`)}`)
 				}
 			},
 			paradedb(attrName) {

@@ -3,7 +3,8 @@ import { type InputObjectFieldApplyResolver } from 'postgraphile/grafast'
 import { type GraphQLInputFieldConfig, GraphQLInputObjectType, type GraphQLInputType } from 'postgraphile/graphql'
 import { type SQL, sql } from 'postgraphile/pg-sql2'
 import { getInputConditionForResource } from '../fancy-mutations/utils.ts'
-import { FILTER_METHODS, FILTER_TYPES_MAP, type FilterMethod, type FilterType } from './filters.ts'
+import { FILTER_METHODS, FILTER_METHODS_CONFIG, FILTER_TYPES_MAP, type FilterMethod, type FilterType } from './filters.ts'
+import { isSubscriptionPlan } from './utils.ts'
 
 type Hook = NonNullable<
 	NonNullable<
@@ -141,9 +142,29 @@ const hook: Hook = (fieldMap, build, ctx) => {
 			)
 		}
 
+		const applyMethod = buildApply(attrName, attr)
+		const applyDefault = method
+			? buildApplys.default(attrName, attr)
+			: undefined
 		return {
 			type: builtType,
-			extensions: {	grafast: { apply: buildApply(attrName, attr) } }
+			extensions: {
+				grafast: {
+					apply: method
+						? (plan, args, info) => {
+							const isSubscription = isSubscriptionPlan(plan)
+							if(
+								isSubscription
+								&& !FILTER_METHODS_CONFIG[method].supportedOnSubscription
+							) {
+								return applyDefault!(plan, args, info)
+							}
+
+							return applyMethod(plan, args, info)
+						}
+						: applyDefault,
+				}
+			}
 		}
 	}
 

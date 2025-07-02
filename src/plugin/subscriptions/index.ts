@@ -204,13 +204,16 @@ const graphQLSchemaHook: Hook = (subFields, build, ctx) => {
 				}
 
 				const { type, extensions } = field
+				const attrName = fieldToAttrMap[fieldName]
 				map[fieldName] = {
 					type,
-					extensions: wrapWithSetAccess(
-						extensions,
-						fieldToAttrMap[fieldName],
-						fieldName
-					)
+					extensions: attrName
+						? wrapWithSetAccess(
+							extensions,
+							fieldToAttrMap[fieldName],
+							fieldName
+						)
+						: extensions
 				}
 				return map
 			}, {} as { [fieldName: string]: GraphQLFieldConfig<any, any> })

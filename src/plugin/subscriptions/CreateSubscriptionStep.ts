@@ -94,7 +94,14 @@ export class CreateSubscriptionStep extends Step<any> {
 					.query<{ id: string, topic: string }>({ text, values: params })
 			)
 
-			console.log(`created sub ${row.id}, on topic ${row.topic}`)
+			console.log(
+				`Created subscription ${row.id}, on topic ${row.topic}`
+				+ (
+					this.#kind === 'update'
+						? `, fields: ${Array.from(this.diffOnlyFields).join(',') || 'all'}`
+						: ''
+				)
+			)
 			return this.#subSrc.subscribe(row.id, true)
 		})
 	}
