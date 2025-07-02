@@ -29,7 +29,6 @@ interface FilterBehaviours extends
 	Record<`filterType:${FilterType}`, true>,
 	Record<`filterMethod:${FilterMethod}`, true> {
 	'searchable': true
-	'proxy': true
 }
 
 declare global {

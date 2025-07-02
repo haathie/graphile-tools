@@ -1,7 +1,7 @@
-import { type PgCodecAttribute, type PgCodecWithAttributes, PgCondition, type PgSelectQueryBuilder, PgSelectStep } from 'postgraphile/@dataplan/pg'
+import { type PgCodecAttribute, type PgCodecWithAttributes, PgCondition } from 'postgraphile/@dataplan/pg'
 import { type InputObjectFieldApplyResolver } from 'postgraphile/grafast'
 import { type GraphQLInputFieldConfig, GraphQLInputObjectType, type GraphQLInputType } from 'postgraphile/graphql'
-import { type SQL } from 'postgraphile/pg-sql2'
+import { type SQL, sql } from 'postgraphile/pg-sql2'
 import { getInputConditionForResource } from '../fancy-mutations/utils.ts'
 import { FILTER_METHODS, FILTER_TYPES_MAP, type FilterMethod, type FilterType } from './filters.ts'
 
@@ -62,9 +62,7 @@ const hook: Hook = (fieldMap, build, ctx) => {
 
 	// add queries via refs
 	for(const [refName, { paths }] of Object.entries(pgCodec.refs || {})) {
-		if(
-			!behavior.pgCodecRefMatches([pgCodec, refName], 'searchable')
-		) {
+		if(!behavior.pgCodecRefMatches([pgCodec, refName], 'searchable')) {
 			continue
 		}
 
@@ -75,9 +73,7 @@ const hook: Hook = (fieldMap, build, ctx) => {
 		}
 
 		if(paths.length > 1) {
-			throw new Error(
-				'Refs w multiple paths are not supported yet.'
-			)
+			throw new Error('Refs w multiple paths are not supported yet.')
 		}
 
 		const relationName = paths[0][0].relationName
@@ -161,10 +157,15 @@ const hook: Hook = (fieldMap, build, ctx) => {
 
 		const rmtRrsc = relation.remoteResource
 		const rmtRrscFrom = rmtRrsc.from as SQL
-		const remoteResourceCond = getInputConditionForResource(rmtRrsc, build)
+		const remoteResourceCond = getInputConditionForResource(
+			// @ts-expect-error
+			rmtRrsc,
+			build
+		)
 		if(!remoteResourceCond) {
-			//throw new Error('TODO')
-			return
+			throw new Error(
+				'The remote resource does not have a condition type defined.'
+			)
 		}
 
 		return {
@@ -172,27 +173,32 @@ const hook: Hook = (fieldMap, build, ctx) => {
 			extensions: {
 				grafast: {
 					apply(target: PgCondition) {
-						const condParent = target['parent'] as PgSelectQueryBuilder
-						if(!condParent) {
-							throw new Error(
-								'Cannot apply relation search condition without a parent query builder.'
-							)
-						}
+						const wherePlan = target.existsPlan({
+							alias: 't',
+							tableExpression: rmtRrscFrom,
+						})
 
-						const alias = condParent.singleRelation(relationName)
-						return new PgCondition({ ...condParent, alias }, false)
+						const localAttrsJoined = sql.join(
+							(relation.localAttributes as string[]).map(attr => (
+								sql`${target.alias}.${sql.identifier(attr)}`
+							)),
+							','
+						)
+						const remoteAttrsJoined = sql.join(
+							(relation.remoteAttributes as string[]).map(attr => (
+								sql`${wherePlan.alias}.${sql.identifier(attr)}`
+							)),
+							','
+						)
+
+						wherePlan.where(sql`(${localAttrsJoined}) = (${remoteAttrsJoined})`)
+
+						return wherePlan
 					}
 				}
 			}
 		}
 	}
-}
-
-function buildConditionFields(
-	codec: PgCodecWithAttributes,
-	build: GraphileBuild.Build,
-) {
-
 }
 
 const passThroughApply: InputObjectFieldApplyResolver = s => s
@@ -203,27 +209,6 @@ export const FancyConditionsPlugin: GraphileConfig.Plugin = {
 	schema: {
 		hooks: {
 			'GraphQLInputObjectType_fields': hook,
-			'GraphQLObjectType_fields_field'(field, build, ctx) {
-				if(!ctx.scope.isRootQuery) {
-					return field
-				}
-
-				// const ogPlan = field.plan
-				// field.plan = (parent, args, info) => {
-				// 	const res = ogPlan!(parent, args, info)
-				// 	if(!(res instanceof ConnectionStep)) {
-				// 		return res
-				// 	}
-
-				// 	const subPlan = res.getSubplan() as PgSelectStep
-				// 	// console.log(ctx.scope.pgCodec.rela)
-				// 	const alias = subPlan.singleRelation('contactsSearchViewByMyId')
-
-				// 	return res
-				// }
-
-				return field
-			}
 		}
 	}
 }
