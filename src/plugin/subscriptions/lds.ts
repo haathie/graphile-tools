@@ -1,5 +1,5 @@
 import { JSONSerialiser, PGMBClient, type PGMBOnMessageOpts } from '@haathie/pgmb'
-import { Pool } from 'pg'
+import { Pool, type PoolClient } from 'pg'
 import { PassThrough, type Writable } from 'stream'
 import { setTimeout } from 'timers/promises'
 
@@ -56,6 +56,7 @@ export class LDSSource {
 	#consumerPromise?: Promise<void>
 	#publishLoopPromise?: Promise<void>
 	#devicePingInterval?: NodeJS.Timeout
+	#publishClient: PoolClient | undefined
 
 	constructor({
 		pool,
@@ -80,6 +81,9 @@ export class LDSSource {
 				}
 			]
 		})
+
+		this.#onClientRemove = this.#onClientRemove.bind(this)
+		this.#pool.on('remove', this.#onClientRemove)
 	}
 
 	async listen() {
@@ -253,12 +257,20 @@ export class LDSSource {
 	}
 
 	async publishChanges() {
-		await this.#pool.query(
-			`SELECT FROM postgraphile_meta.send_changes_to_subscriptions(
-				$1, NULL, $2, 'add-tables', $3
-			)`,
-			[this.slotName, this.chunkSize, this.tablePatterns.join(',')]
-		)
+		this.#publishClient ||= await this.#pool.connect()
+		try {
+			await this.#publishClient.query(
+				`SELECT FROM postgraphile_meta.send_changes_to_subscriptions(
+					$1, NULL, $2, 'add-tables', $3
+				)`,
+				[this.slotName, this.chunkSize, this.tablePatterns.join(',')]
+			)
+		} catch(err: any) {
+			if(err.code === '55006') {
+				// this error means that the slot is already in use by
+				// another session. Can ignore this
+			}
+		}
 	}
 
 	async createPublisherSlot() {
@@ -287,6 +299,14 @@ export class LDSSource {
 
 	async close() {
 		this.#closed = true
+
+		if(this.#publishClient) {
+			await this.#publishClient.release()
+			this.#publishClient = undefined
+		}
+
+		this.#pool.off('remove', this.#onClientRemove)
+
 		clearInterval(this.#devicePingInterval)
 		for(const stream of Object.values(this.#subscribers)) {
 			stream.end()
@@ -312,6 +332,13 @@ export class LDSSource {
 			'SELECT postgraphile_meta.mark_device_queue_active($1::varchar)',
 			[this.deviceId]
 		)
+	}
+
+	#onClientRemove = (client: PoolClient) => {
+		if(this.#publishClient === client) {
+			this.#publishClient = undefined
+			console.log('Publish client removed, resetting.')
+		}
 	}
 
 	async #handleMessage({
