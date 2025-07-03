@@ -1,14 +1,16 @@
 services:
   postgres:
-    image: ghcr.io/haathie/postgres:13232e86f3e5b9b0f8bc09a536e4328ff6ba198b
+    image: haathie/postgres:f859711de2c17d1f5757e645a9515b32598f9c10
     environment:
       POSTGRES_PASSWORD: ''
       POSTGRES_HOST_AUTH_METHOD: trust
-      POSTGRES_DB: im-contacts
+      POSTGRES_DATABASE: postgres
     ports:
       - '5432:5432'
-    # volumes:
-    #   - ./dev/pg_data:/var/lib/postgresql/data
+    command: -c config_file=/etc/postgresql.conf
+    volumes:
+      - ./dev/pg.conf:/etc/postgresql.conf
+      - ./dev/pg_data:/var/lib/postgresql/data
     deploy:
       resources:
         limits:
