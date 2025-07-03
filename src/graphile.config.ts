@@ -28,16 +28,22 @@ const preset: GraphileConfig.Preset = {
 			// Database connection string, read from an environmental variable:
 			connectionString: process.env.PG_URI,
 			superuserConnectionString: process.env.PG_URI,
+			poolConfig: { min: 15, max: 30 },
 			pgSettings(ctx) {
 				let teamId = ctx.node?.req?.headers['org-id']
 				if(typeof teamId !== 'string') {
 					teamId = 'default-org-id'
 				}
 
+				let userId = ctx.node?.req?.headers['user-id']
+				if(typeof userId !== 'string') {
+					userId = 'default-user-id'
+				}
+
 				return {
 					'role': 'app_user',
 					'app.org_id': teamId,
-					'app.user_id': 'ad_singh',
+					'app.user_id': userId,
 				}
 			},
 			pgSettingsForIntrospection: {
@@ -51,7 +57,11 @@ const preset: GraphileConfig.Preset = {
 		deviceId: process.env.DEVICE_ID || 'default-device',
 		publishChanges: true
 	},
-	grafserv: { watch: true, websockets: true },
+	grafserv: {
+		// watch: true,
+		// websockets: true,
+		maxRequestLength: 1_000_000
+	},
 	grafast: { explain: true },
 	schema: {
 		defaultBehavior: '-single',
