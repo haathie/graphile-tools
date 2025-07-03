@@ -7,7 +7,7 @@ import { sql } from 'postgraphile/pg-sql2'
 import { insertData, type SimplePgClient } from './pg-utils.ts'
 import { executeNestedMutations, getRelationFieldName } from './utils.ts'
 
-const MAX_BULK_MUTATION_LENGTH = 100
+const MAX_BULK_MUTATION_LENGTH = 1000
 
 type CreateMutationOpts = {
 	table: PgResource<string, PgCodecWithAttributes>
