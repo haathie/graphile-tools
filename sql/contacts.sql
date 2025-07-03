@@ -1,8 +1,25 @@
 DROP SCHEMA IF EXISTS app CASCADE;
 CREATE SCHEMA IF NOT EXISTS app;
--- CREATE ROLE IF "app_user" WITH NOLOGIN;
+
+DO $$
+BEGIN
+	-- create app_user role if it doesn't exist
+	IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'app_user') THEN
+		CREATE ROLE "app_user" LOGIN PASSWORD 'app_user';
+	END IF;
+END
+$$;
+
+DO $$
+BEGIN
+	EXECUTE format(
+		'GRANT CONNECT, TEMPORARY ON DATABASE %I TO "app_user";',
+		current_database()
+	);
+END
+$$;
+
 GRANT USAGE, CREATE ON SCHEMA app TO "app_user";
-GRANT CONNECT, TEMPORARY ON DATABASE "im-contacts" TO "app_user";
 
 -- Create custom types first
 CREATE TYPE app.contact_type AS ENUM ('individual', 'group', 'channel', 'post');
@@ -10,12 +27,6 @@ CREATE TYPE app.contact_type AS ENUM ('individual', 'group', 'channel', 'post');
 CREATE TYPE app.contact_img_info AS (
 	url VARCHAR(255),
 	fetched_at TIMESTAMPTZ
-);
-
-CREATE TYPE app.min_contact_tag AS (
-	id VARCHAR(24),
-	created_at TIMESTAMPTZ,
-	created_by VARCHAR(64)
 );
 
 -- Create a sequential ID
@@ -76,7 +87,7 @@ CREATE TABLE app.contacts (
 			platform_names
 		)
 	) STORED,
-	tags app.min_contact_tag[] DEFAULT ARRAY[]::app.min_contact_tag[],
+	tags JSONB DEFAULT '{}',
 	UNIQUE (org_id, phone_number),
 	UNIQUE (org_id, email)
 );
@@ -113,6 +124,7 @@ $$ language 'plpgsql';
 CREATE TRIGGER set_updated_at_trigger
 	BEFORE UPDATE ON app.contacts
 	FOR EACH ROW
+	WHEN (OLD IS DISTINCT FROM NEW)
 	EXECUTE FUNCTION app.set_updated_at();
 
 -- Trigger function to handle assignment tracking
@@ -171,24 +183,9 @@ WITH CHECK (
 -- search index for contacts_search
 CREATE EXTENSION IF NOT EXISTS pg_search;
 
--- Converts app.min_contact_tag[] to a map type
--- { [tagId: string]: { created_at: string, created_by: string } }
-CREATE FUNCTION app.convert_to_map(tags app.min_contact_tag[])
-RETURNS JSONB AS $$
-BEGIN
-	RETURN jsonb_object_agg(
-		tag.id,
-		jsonb_build_object(
-			'created_at', tag.created_at,
-			'created_by', tag.created_by
-		)
-	) FROM unnest(tags) AS tag;
-END
-$$ LANGUAGE plpgsql IMMUTABLE PARALLEL SAFE;
-
 CREATE INDEX IF NOT EXISTS
 	contacts_search_idx ON app.contacts
-	USING bm25(id, org_id, search, created_at, app.convert_to_map(tags))
+	USING bm25(id, org_id, search, created_at, tags)
 	WITH (
 		key_field='id',
 		text_fields='{
@@ -209,7 +206,7 @@ CREATE INDEX IF NOT EXISTS
 			}
 		}',
 		json_fields='{
-			"_pg_search_4": {
+			"tags": {
 				"fast":true,
 				"tokenizer": {"type": "keyword"},
 				"record": "basic"
@@ -300,9 +297,10 @@ BEGIN
 		WITH updated_contacts AS (
 			SELECT
 				contact_id,
-				ARRAY_AGG(
-					(tag_id, created_at, created_by)::app.min_contact_tag
-				) AS new_tags
+				jsonb_object_agg(
+					tag_id,
+					jsonb_build_object('created_at', created_at, 'created_by', created_by)
+				) as new_tags
 			FROM new_table
 			GROUP BY contact_id
 		)
@@ -319,17 +317,14 @@ BEGIN
 			GROUP BY contact_id
 		)
 		UPDATE app.contacts c
-		SET tags = ARRAY(
-			SELECT t FROM unnest(tags) AS t
-			WHERE NOT (t.id = ANY(ut.tags_to_remove))
-		)
+		SET tags = tags - tags_to_remove
 		FROM updated_contacts ut
 		WHERE c.id = ut.contact_id;
 	END IF;
 
 	RETURN NULL;
 END
-$$ LANGUAGE plpgsql;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
 
 CREATE TRIGGER new_contact_tags_trigger
 	AFTER INSERT ON app.contact_tags
