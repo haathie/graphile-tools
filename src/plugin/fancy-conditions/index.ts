@@ -17,10 +17,16 @@ type FilterInfo = {
 	method: FilterMethod | undefined
 }
 
-const inputConditionTypes: { [key: string]: GraphQLInputType } = {}
+declare global {
+	namespace GraphileBuild {
+		interface Build {
+			inputConditionTypes: { [key: string]: GraphQLInputType }
+		}
+	}
+}
 
 const hook: Hook = (fieldMap, build, ctx) => {
-	const { behavior, inflection } = build
+	const { behavior, inflection, inputConditionTypes } = build
 	const { scope: { pgCodec: _codec, isPgCondition } } = ctx
 	if(!isPgCondition || !_codec?.extensions?.isTableLike) {
 		return fieldMap
@@ -229,6 +235,10 @@ export const FancyConditionsPlugin: GraphileConfig.Plugin = {
 	version: '0.0.1',
 	schema: {
 		hooks: {
+			build(build) {
+				return build
+					.extend(build, { inputConditionTypes: {} }, 'FancyConditionsPlugin')
+			},
 			'GraphQLInputObjectType_fields': hook,
 		}
 	}
