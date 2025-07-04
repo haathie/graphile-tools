@@ -148,28 +148,38 @@ const hook: Hook = (fieldMap, build, ctx) => {
 			)
 		}
 
-		const applyMethod = buildApply(attrName, attr)
-		const applyDefault = method
-			? buildApplys.default(attrName, attr)
-			: undefined
+		const applyDefault = buildApplys.default(attrName, attr)
 		return {
 			type: builtType,
 			extensions: {
 				grafast: {
 					apply: method
-						? (plan, args, info) => {
-							const isSubscription = isSubscriptionPlan(plan)
-							if(
-								isSubscription
-								&& !FILTER_METHODS_CONFIG[method].supportedOnSubscription
-							) {
-								return applyDefault!(plan, args, info)
-							}
-
-							return applyMethod(plan, args, info)
-						}
+						? buildMethodApply(method)
 						: applyDefault,
 				}
+			}
+		}
+
+		function buildMethodApply(
+			method: FilterMethod
+		): InputObjectFieldApplyResolver<PgCondition> | undefined {
+			const applyMethod = buildApplys[method]?.(attrName, attr)
+			if(!applyMethod) {
+				throw new Error(
+					`No apply builder for filter type ${filter} and method ${method}`
+				)
+			}
+
+			return (plan, args, info) => {
+				const isSubscription = isSubscriptionPlan(plan)
+				if(
+					isSubscription
+					&& !FILTER_METHODS_CONFIG[method].supportedOnSubscription
+				) {
+					return applyDefault(plan, args, info)
+				}
+
+				return applyMethod(plan, args, info)
 			}
 		}
 	}
