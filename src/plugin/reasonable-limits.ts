@@ -25,7 +25,7 @@ export const ReasonableLimitsPlugin: GraphileConfig.Plugin = {
 					&& (isPgFieldConnection || isPgManyRelationConnectionField)
 					&& (argName === 'first' || argName === 'last')
 				const isFirst = argName === 'first'
-				if(!isLimitField) {
+				if(!isLimitField || !pgFieldResource) {
 					return input
 				}
 
@@ -46,7 +46,6 @@ export const ReasonableLimitsPlugin: GraphileConfig.Plugin = {
 					)
 				)
 
-
 				if(
 					typeof input.defaultValue === 'undefined'
 					&& typeof defaultValue === 'number'
@@ -64,7 +63,7 @@ export const ReasonableLimitsPlugin: GraphileConfig.Plugin = {
 						}
 					})
 
-					return ogPlan(plan, fieldPlan, input, info)
+					return ogPlan?.(plan, fieldPlan, input, info)
 				}
 
 				return input
@@ -72,7 +71,10 @@ export const ReasonableLimitsPlugin: GraphileConfig.Plugin = {
 				function getIntTag(tag: string) {
 					const tags = codec.extensions?.tags
 					const defaultValue = tags?.[tag]
-					if(typeof defaultValue === 'undefined') {
+					if(
+						typeof defaultValue !== 'number'
+						&& typeof defaultValue !== 'string'
+					) {
 						return undefined
 					}
 
