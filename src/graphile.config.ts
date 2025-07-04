@@ -44,6 +44,7 @@ const preset: GraphileConfig.Preset = {
 					'role': 'app_user',
 					'app.org_id': teamId,
 					'app.user_id': userId,
+					'app.has_full_contacts_access': ctx.node?.req?.headers['has_full_contacts_access'] !== 'false',
 				}
 			},
 			pgSettingsForIntrospection: {

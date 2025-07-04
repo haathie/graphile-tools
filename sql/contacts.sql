@@ -172,10 +172,21 @@ ON app.contacts TO "app_user";
 CREATE POLICY contacts_team_isolation ON app.contacts
 FOR ALL TO "app_user"
 USING (
-	org_id = current_setting('app.org_id')
+	contacts.org_id @@@ paradedb.boolean(
+		must := ARRAY[paradedb.term('org_id', current_setting('app.org_id'))] || (
+			CASE WHEN current_setting('app.has_full_contacts_access') = 'true'
+			THEN ARRAY[]::paradedb.searchqueryinput[]
+			ELSE ARRAY[paradedb.term('assignee', app.current_actor_id())]
+			END
+		)
+	)
 )
 WITH CHECK (
 	org_id = current_setting('app.org_id')
+	AND (
+		current_setting('app.has_full_contacts_access') = 'true'
+		OR assignee = app.current_actor_id()
+	)
 );
 
 -- Create a search index on the contacts table
@@ -185,11 +196,16 @@ CREATE EXTENSION IF NOT EXISTS pg_search;
 
 CREATE INDEX IF NOT EXISTS
 	contacts_search_idx ON app.contacts
-	USING bm25(id, org_id, search, created_at, tags)
+	USING bm25(id, org_id, search, created_at, assignee, tags)
 	WITH (
 		key_field='id',
 		text_fields='{
 			"org_id": {
+				"fast":true,
+				"tokenizer": {"type": "keyword"},
+				"record": "basic"
+			},
+			"assignee": {
 				"fast":true,
 				"tokenizer": {"type": "keyword"},
 				"record": "basic"
