@@ -1,3 +1,4 @@
+import type {} from 'postgraphile'
 import type { PgCodec } from 'postgraphile/@dataplan/pg'
 import { sideEffect } from 'postgraphile/grafast'
 

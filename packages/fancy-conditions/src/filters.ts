@@ -8,6 +8,10 @@ export type FilterType = 'eq'
 	| 'range'
 	| 'icontains'
 
+/**
+ * Method used to apply filters -- useful for different index types like
+ * GIN, paradeb, etc.
+ */
 export type FilterMethod = 'paradedb'
 
 type ApplyBuilder = (

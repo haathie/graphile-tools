@@ -1,14 +1,11 @@
-// Only needed for TypeScript types support
 import { PgSimplifyInflectionPreset } from '@graphile/simplify-inflection'
-// Use the 'pg' module to connect to the database
+import { FancyConditionsPlugin } from '@haathie/fancy-conditions'
+import { FancyMutationsPlugin } from '@haathie/fancy-mutations'
+import { FancySubscriptionsPlugin } from '@haathie/fancy-subscriptions'
+import { ReasonableLimitsPlugin } from '@haathie/graphile-reasonable-limits'
 import { makePgService } from 'postgraphile/adaptors/pg'
-import { SubscriptionPlugin } from 'postgraphile/graphile-build'
 // The standard base preset to use, includes the main PostGraphile features
 import { PostGraphileAmberPreset } from 'postgraphile/presets/amber'
-import { FancyConditionsPlugin } from './plugin/fancy-conditions/index.ts'
-import { FancyMutationsPlugin } from './plugin/fancy-mutations/index.ts'
-import { ReasonableLimitsPlugin } from './plugin/reasonable-limits.ts'
-import { SubscriptionsPlugin } from './plugin/subscriptions/index.ts'
 
 const preset: GraphileConfig.Preset = {
 	extends: [
@@ -16,10 +13,9 @@ const preset: GraphileConfig.Preset = {
 		PgSimplifyInflectionPreset
 	],
 	plugins: [
-		SubscriptionPlugin,
+		FancySubscriptionsPlugin,
 		ReasonableLimitsPlugin,
 		FancyMutationsPlugin,
-		SubscriptionsPlugin,
 		FancyConditionsPlugin,
 	],
 	pgServices: [
@@ -44,7 +40,9 @@ const preset: GraphileConfig.Preset = {
 					'role': 'app_user',
 					'app.org_id': teamId,
 					'app.user_id': userId,
-					'app.has_full_contacts_access': ctx.node?.req?.headers['has_full_contacts_access'] !== 'false',
+					'app.has_full_contacts_access': (
+						ctx.node?.req?.headers['has_full_contacts_access'] !== 'false'
+					).toString(),
 				}
 			},
 			pgSettingsForIntrospection: {
@@ -60,7 +58,7 @@ const preset: GraphileConfig.Preset = {
 	},
 	grafserv: {
 		// watch: true,
-		// websockets: true,
+		websockets: true,
 		maxRequestLength: 1_000_000
 	},
 	grafast: { explain: true },

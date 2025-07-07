@@ -25,6 +25,10 @@ export class PgSelectAndModify extends PgSelectStep {
 		super({ ...opts, mode: 'mutation' })
 	}
 
+	/**
+	 * @returns {ReturnType<PgSelectStep['execute']>}
+	 * 	Explicitly typed to avoid private type usage
+	 */
 	execute(...args) {
 		if(!this.#modificationType) {
 			return super.execute(...args)

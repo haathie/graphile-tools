@@ -1,10 +1,12 @@
+import { getInputConditionForResource, getRelationFieldName } from '@haathie/graphile-common-utils'
 import { hostname } from 'os'
 import { Pool } from 'pg'
-import { type PgCodecWithAttributes, type PgResource, type PgResourceUnique } from 'postgraphile/@dataplan/pg'
+import type {} from 'postgraphile'
+import type { PgCodecWithAttributes, PgResource, PgResourceUnique } from 'postgraphile/@dataplan/pg'
+import type { } from 'postgraphile/adaptors/pg'
 import { AccessStep, type FieldPlanResolver, loadMany, Step } from 'postgraphile/grafast'
 import { type GraphQLFieldConfig, type GraphQLFieldExtensions, GraphQLList, GraphQLNonNull, GraphQLObjectType, type GraphQLObjectTypeConfig } from 'postgraphile/graphql'
 import { sql } from 'postgraphile/pg-sql2'
-import { getInputConditionForResource, getRelationFieldName } from '../fancy-mutations/utils.ts'
 import { CreateSubscriptionStep } from './CreateSubscriptionStep.ts'
 import { LDSSource, type PgChangeData, type PgChangeOp } from './lds.ts'
 import { PgWhereBuilder } from './PgWhereBuilder.ts'
@@ -306,8 +308,8 @@ function createSubscriptionPlan(
 	return plan
 }
 
-export const SubscriptionsPlugin: GraphileConfig.Plugin = {
-	name: 'SubscriptionsPlugin',
+export const FancySubscriptionsPlugin: GraphileConfig.Plugin = {
+	name: 'FancySubscriptionsPlugin',
 	grafserv: {
 		middleware: {
 			async setPreset(

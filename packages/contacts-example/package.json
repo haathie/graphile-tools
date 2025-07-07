@@ -1,0 +1,14 @@
+{
+	"name": "@haathie/contacts-example",
+	"type": "module",
+	"scripts": {},
+	"dependencies": {
+		"@haathie/graphile-reasonable-limits": "*",
+		"@haathie/fancy-subscriptions": "*",
+		"@haathie/fancy-mutations": "*",
+		"@haathie/fancy-conditions": "*",
+		"@graphile/simplify-inflection": "^8.0.0-beta.7",
+		"express": "^5.1.0",
+		"http-terminator": "^3.2.0"
+	}
+}

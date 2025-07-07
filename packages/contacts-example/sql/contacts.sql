@@ -6,6 +6,8 @@ BEGIN
 	-- create app_user role if it doesn't exist
 	IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'app_user') THEN
 		CREATE ROLE "app_user" LOGIN PASSWORD 'app_user';
+		-- Ensure app_user cannot run long running queries
+		ALTER ROLE "app_user" SET statement_timeout = '30s';
 	END IF;
 END
 $$;

@@ -1,3 +1,4 @@
+import { getRelationFieldName } from '@haathie/graphile-common-utils'
 import { type GraphQLFieldConfig, type GraphQLInputFieldConfig, GraphQLInputObjectType, type GraphQLInputObjectTypeConfig, GraphQLInt, GraphQLList, GraphQLNonNull, GraphQLObjectType } from 'graphql'
 import type { QueryResult } from 'pg'
 import { type PgClient, type PgCodecWithAttributes, PgResource, TYPES, withPgClientTransaction } from 'postgraphile/@dataplan/pg'
@@ -5,7 +6,7 @@ import { type FieldPlanResolver, lambda, sideEffect, type Step } from 'postgraph
 import { GraphQLEnumType } from 'postgraphile/graphql'
 import { sql } from 'postgraphile/pg-sql2'
 import { insertData, type SimplePgClient } from './pg-utils.ts'
-import { executeNestedMutations, getRelationFieldName } from './utils.ts'
+import { executeNestedMutations } from './utils.ts'
 
 const MAX_BULK_MUTATION_LENGTH = 1000
 
@@ -15,7 +16,7 @@ type CreateMutationOpts = {
 }
 
 type GrafastPlanParams<T extends Step = Step> = Parameters<
-	FieldPlanResolver<any, T, any>
+	FieldPlanResolver<T, any, any>
 >
 
 type MutationInput<T = any> = {
@@ -125,7 +126,7 @@ export function createInsertObject(
 			}
 		})
 
-		const $args = args.getRaw('input') as Step
+		const $args = args.getRaw('input')
 		const $tx = withPgClientTransaction(executor, $args, executeAsync)
 
 		return $tx
@@ -302,8 +303,13 @@ function getRowCountPlan(...[plan]: GrafastPlanParams<Step<QueryResult>>) {
 function mapToSimplePgClient(client: PgClient): SimplePgClient {
 	return {
 		async query(query, params) {
-			console.log('Executing query:', query, params)
+			// console.log('Executing query:', query, params)
+			const now = new Date()
 			const rslt = await client.query({ text: query, values: params })
+			if(query.includes('INSERT') || query.includes('UPDATE')) {
+				console.log(`"${query.slice(0, 100)}..." executed in ${Date.now() - now.getTime()}ms`)
+			}
+
 			return { rows: rslt.rows, rowCount: rslt.rowCount || 0 }
 		},
 	}

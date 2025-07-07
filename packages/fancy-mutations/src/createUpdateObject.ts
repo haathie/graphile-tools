@@ -1,8 +1,8 @@
+import { getInputConditionForResource } from '@haathie/graphile-common-utils'
 import { type PgCodecWithAttributes, PgResource, PgSelectStep } from 'postgraphile/@dataplan/pg'
 import { type FieldPlanResolver, lambda, Step } from 'postgraphile/grafast'
-import { type GraphQLFieldConfig, GraphQLInt, GraphQLList, GraphQLNonNull, GraphQLObjectType } from 'postgraphile/graphql'
+import { type GraphQLFieldConfig, GraphQLInputObjectType, GraphQLInt, GraphQLList, GraphQLNonNull, GraphQLObjectType } from 'postgraphile/graphql'
 import { PgSelectAndModify } from './PgSelectAndModify.js'
-import { getInputConditionForResource } from './utils.ts'
 
 type CreateMutationOpts = {
 	table: PgResource<string, PgCodecWithAttributes>
@@ -13,7 +13,7 @@ type GrafastPlanParams<T extends Step = Step> = Parameters<
 	FieldPlanResolver<T, any, any>
 >
 
-export function createDeleteObject(
+export function createUpdateObject(
 	{ table, build }: CreateMutationOpts
 ): GraphQLFieldConfig<any, any> | undefined {
 	const { inflection } = build
@@ -24,7 +24,7 @@ export function createDeleteObject(
 		return
 	}
 
-	if(!table.extensions?.canDelete || !table.extensions.isDeletable) {
+	if(!table.extensions?.canUpdate || !table.extensions.isUpdatable) {
 		return
 	}
 
@@ -34,14 +34,21 @@ export function createDeleteObject(
 		return
 	}
 
-	const baseName = inflection.pluralize(`delete_${table.name}`)
+	const baseName = inflection.pluralize(`update_${table.name}`)
+	const patchType = build
+		.getGraphQLTypeByPgCodec(codec, 'patch') as GraphQLInputObjectType
+	if(!patchType) {
+		return
+	}
+
 	const conditionArg = getInputConditionForResource(table, build)
 	if(!conditionArg) {
 		return
 	}
 
+
 	return {
-		description: `Delete one or more ${table.name} items`,
+		description: `Update one or more ${table.name} items`,
 		type: new GraphQLObjectType({
 			name: inflection.upperCamelCase(`${baseName}_payload`),
 			fields: {
@@ -73,6 +80,16 @@ export function createDeleteObject(
 						}
 					}
 				}
+			},
+			patch: {
+				type: patchType,
+				extensions: {
+					grafast: {
+						applyPlan(plan, fields: PgSelectAndModify, input) {
+							input.apply(fields, () => fields)
+						}
+					}
+				}
 			}
 		},
 		extensions: {
@@ -83,13 +100,8 @@ export function createDeleteObject(
 	}
 
 	function plan() {
-		const step = new PgSelectAndModify({
-			resource: table,
-			mode: 'mutation',
-			identifiers: [],
-		})
-		step.delete()
-
+		const step = new PgSelectAndModify({ resource: table, identifiers: [] })
+		step.update()
 		return step
 	}
 }

@@ -5,18 +5,16 @@
     "module": "nodenext",
     "outDir": "lib",
     "strict": true,
+    "skipLibCheck": true,
     "erasableSyntaxOnly": true,
     "rewriteRelativeImportExtensions": true,
-    "rootDir": "src",
-    "allowJs": true
+    "allowJs": true,
+    "baseUrl": ".",
+    "paths": {},
+    "declaration": true
   },
-  "include": [
-    "src/*.ts", 
-    "src/graphile.config.ts",
-    "src/**/*.ts",
-    "src/**/*.js"
-  ],
   "exclude": [
+    "src",
     "node_modules"
   ]
 }

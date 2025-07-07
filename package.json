@@ -1,23 +1,22 @@
 {
-  "name": "@haathie/service-im",
+  "name": "@haathie/graphile-tools",
   "version": "1.0.0",
   "description": "",
   "type": "module",
+  "workspaces": [
+    "packages/*"
+  ],
   "scripts": {
     "build": "tsc",
     "lint": "eslint ./src --ext .js,.ts,.jsx,.tsx",
     "lint:fix": "eslint ./src --fix --ext .js,.ts,.jsx,.tsx",
-    "run-file": "sh scripts/run-with-env.sh"
+    "run-file": "sh scripts/run-with-env.sh",
+    "start:contacts-example": "npm run run-file -- packages/contacts-example/src/start-server.ts"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "@graphile/lds": "^4.14.1",
-    "@graphile/simplify-inflection": "^8.0.0-beta.6",
-    "@haathie/pgmb": "^0.1.8",
-    "express": "^5.1.0",
-    "http-terminator": "^3.2.0",
     "pg": "^8.6.0",
     "postgraphile": "^5.0.0-beta.41"
   },

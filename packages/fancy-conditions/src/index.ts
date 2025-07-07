@@ -1,10 +1,9 @@
+import { getInputConditionForResource, isSubscriptionPlan } from '@haathie/graphile-common-utils'
 import { type PgCodecAttribute, type PgCodecWithAttributes, PgCondition } from 'postgraphile/@dataplan/pg'
 import { type InputObjectFieldApplyResolver } from 'postgraphile/grafast'
 import { type GraphQLInputFieldConfig, GraphQLInputObjectType, type GraphQLInputType } from 'postgraphile/graphql'
 import { type SQL, sql } from 'postgraphile/pg-sql2'
-import { getInputConditionForResource } from '../fancy-mutations/utils.ts'
 import { FILTER_METHODS, FILTER_METHODS_CONFIG, FILTER_TYPES_MAP, type FilterMethod, type FilterType } from './filters.ts'
-import { isSubscriptionPlan } from './utils.ts'
 
 type Hook = NonNullable<
 	NonNullable<
@@ -153,9 +152,7 @@ const hook: Hook = (fieldMap, build, ctx) => {
 			type: builtType,
 			extensions: {
 				grafast: {
-					apply: method
-						? buildMethodApply(method)
-						: applyDefault,
+					apply: method ? buildMethodApply(method) : applyDefault
 				}
 			}
 		}

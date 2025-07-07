@@ -1,3 +1,4 @@
+import type {} from 'postgraphile'
 import { graphQLSchemaHook } from './graphQLSchema.ts'
 
 export const FancyMutationsPlugin: GraphileConfig.Plugin = {
