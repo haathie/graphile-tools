@@ -58,6 +58,11 @@ const preset: GraphileConfig.Preset = {
 		deviceId: process.env.DEVICE_ID || 'default-device',
 		publishChanges: true
 	},
+	rateLimits: {
+		isAuthenticated(ctx) {
+			return !!ctx.pgSettings?.['app.user_id']
+		},
+	},
 	grafserv: {
 		// watch: true,
 		websockets: true,
@@ -68,13 +73,9 @@ const preset: GraphileConfig.Preset = {
 		defaultBehavior: '-single',
 		rateLimits: {
 			authenticated: {
-				default: { limit: 100, durationS: 60 },
-				getRateLimitingKey(ctx) {
-					if(!('app.org_id' in ctx) || typeof ctx['app.org_id'] !== 'string') {
-						throw new Error('No org_id in context for rate limiting')
-					}
-
-					return ctx['app.org_id']
+				default: { limit: 10, durationS: 60 },
+				getRateLimitingKey({ pgSettings }) {
+					return pgSettings?.['app.org_id']
 				},
 			}
 		},

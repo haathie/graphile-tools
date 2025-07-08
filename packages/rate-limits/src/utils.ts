@@ -14,15 +14,18 @@ type _RateLimiterInput = {
 	apiName: string
 }
 
+export const DEFAULT_TABLE_NAME = 'rate_limits'
+export const DEFAULT_SCHEMA_NAME = 'postgraphile_meta'
+
 export async function executeRateLimitsDdl(
 	pool: Pool,
 	{
-		rateLimitsTableName = 'rate_limits',
+		rateLimitsTableName = DEFAULT_TABLE_NAME,
 		rateLimitsTableType = 'unlogged',
 	}: RateLimitsOptions
 ) {
 	const ddl = DDL
-		.replaceAll('{{schema_name}}', 'postgraphile_meta')
+		.replaceAll('{{schema_name}}', DEFAULT_SCHEMA_NAME)
 		.replaceAll('{{table_name}}', rateLimitsTableName)
 		.replaceAll('{{table_type}}', rateLimitsTableType)
 	await pool.query(`BEGIN;\n${ddl}\nCOMMIT;`)
@@ -38,22 +41,30 @@ CREATE {{table_type}} TABLE IF NOT EXISTS "{{schema_name}}"."{{table_name}}" (
 );
 `
 
-export async function executeRateLimitStep(
+export async function applyRateLimits(
 	ctx: Grafast.Context,
 	apiName: string,
 	rateLimits: RateLimitParsedTag[],
 	configs: { [name: string]: RateLimitsConfig }
 ) {
+	const {
+		pgSettings,
+		withPgClient,
+		rateLimitsOpts: { rateLimitsTableName = DEFAULT_TABLE_NAME },
+	} = ctx
 	const finalLimits: _RateLimiterInput[] = []
 	for(const rateLimit of rateLimits) {
 		const { rateLimitName } = rateLimit
-		const { getRateLimitingKey } = configs[rateLimitName]
+		const { getRateLimitingKey, getRateLimit } = configs[rateLimitName]
 		const key = getRateLimitingKey(ctx)
 		if(!key) {
 			continue // no key to limit
 		}
 
-		const limit = rateLimit.limit || configs[rateLimitName].default
+		const customLimit = await getRateLimit?.(key)
+		const limit = customLimit
+			|| rateLimit.limit
+			|| configs[rateLimitName].default
 		if(!limit) {
 			continue
 		}
@@ -64,25 +75,32 @@ export async function executeRateLimitStep(
 			key,
 			apiName,
 		})
+
+		console.debug(
+			{ key, limit, name: rateLimitName, apiName, isCustom: !!customLimit },
+			'applying rate limit'
+		)
 	}
 
 	if(!finalLimits.length) {
 		return // no rate limits to apply
 	}
 
-	await ctx.withPgClient(ctx.pgSettings, async client => {
+	await withPgClient(pgSettings, async client => {
 		for(const input of finalLimits) {
 			const { limit, name, key, apiName } = input
 			const limiter = new RateLimiterPostgres({
 				storeClient: client.rawClient,
 				storeType: 'client',
-				schemaName: 'postgraphile_meta',
-				tableName: 'rate_limits',
+				schemaName: DEFAULT_SCHEMA_NAME,
+				tableName: rateLimitsTableName,
 				tableCreated: true,
 				points: limit.limit,
 				duration: limit.durationS,
 				keyPrefix: name + '_' + apiName,
+				clearExpiredByTimeout: false
 			})
+
 			try {
 				await limiter.consume(key)
 			} catch(err) {
@@ -142,7 +160,7 @@ export function parseRateLimitTag(tag: unknown): RateLimitParsedTag[] | undefine
 		const [typesStr, rateLimitName, limitStrWithDuration] = limitStr.split(':')
 		if(!typesStr || !rateLimitName) {
 			throw new Error(
-				`Invalid rate limit tag format: ${limitStr}.
+				`Invalid rate limit tag format: "${limitStr}".
 					Expected format: "type1,type2,...:rateLimitName:limit/duration".`
 			)
 		}
@@ -174,29 +192,61 @@ function parseDuration(durationStr: string): RateLimit | undefined {
 }
 
 export function getRateLimitsToApply(
-	parsedTags: RateLimitParsedTag[],
+	parsedTags: RateLimitParsedTag[] | undefined,
 	availableConfigs: RateLimitsConfigMap,
 	ctx: RateLimitableContext
 ): RateLimitParsedTag[] {
 	const currentTypes = new Set(getRateLimitTypes(ctx))
-	return parsedTags.filter(({ types }) => types.some(t => currentTypes.has(t)))
+	const relevantTags = parsedTags
+		?.filter(({ types }) => types.some(t => currentTypes.has(t))) || []
+
+	if(!isRoot(ctx)) {
+		return relevantTags
+	}
+
+	for(const name in availableConfigs) {
+		const value = availableConfigs[name]
+		if(!value.default) {
+			continue
+		}
+
+		if(relevantTags.some(tag => tag.rateLimitName === name)) {
+			continue // already has this rate limit
+		}
+
+		// add the default rate limit if not already present
+		relevantTags.push({
+			types: [],
+			rateLimitName: name,
+			limit: value.default,
+			defaultApplied: true,
+		})
+	}
+
+	return relevantTags
+}
+
+function isRoot({ scope }: RateLimitableContext) {
+	return !!scope.isRootMutation
+		|| !!scope.isRootQuery
+		|| !!scope.isRootSubscription
 }
 
 function *getRateLimitTypes(
-	ctx: RateLimitableContext
+	{ type, scope }: RateLimitableContext
 ): Generator<RateLimitType, void, void> {
-	switch (ctx.type) {
+	switch (type) {
 	case 'GraphQLObjectType':
 		const {
 			isConnectionType,
 			isPgFieldConnection,
-		} = ctx.scope
+		} = scope
 		if(isConnectionType || isPgFieldConnection) {
 			yield 'connection'
 		}
 
 		break
 	default:
-		throw new Error(`Unsupported type for rate limits: ${ctx.type}`)
+		throw new Error(`Unsupported type for rate limits: ${type}`)
 	}
 }

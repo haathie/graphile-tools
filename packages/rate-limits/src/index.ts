@@ -3,35 +3,30 @@ import { Pool } from 'pg'
 import type {} from 'postgraphile'
 import type {} from 'postgraphile/adaptors/pg'
 import { context, sideEffect } from 'postgraphile/grafast'
+import { RateLimiterPostgres } from 'rate-limiter-flexible'
 import type { RateLimitsConfig } from './types.ts'
-import { executeRateLimitsDdl, executeRateLimitStep, getRateLimitsToApply, parseRateLimitTag } from './utils.ts'
+import { applyRateLimits, DEFAULT_SCHEMA_NAME, DEFAULT_TABLE_NAME, executeRateLimitsDdl, getRateLimitsToApply, parseRateLimitTag } from './utils.ts'
 
 const RATE_LIMITS_TAG = 'rateLimits'
 
 const UNAUTHENTICATED_RATE_LIMIT_CONFIG: RateLimitsConfig = {
 	'default': { limit: 60, durationS: 60 },
 	getRateLimitingKey(ctx) {
+		if(ctx.rateLimitsOpts.isAuthenticated(ctx)) {
+			return
+		}
+
 		return ctx.ipAddress || 'unknown-ip'
 	}
 }
 
+// we'll have this rate limiter to clear expired rate limits
+// in the background.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+let expiredLimiterClearer: RateLimiterPostgres
+
 export const RateLimitsPlugin: GraphileConfig.Plugin = {
 	name: 'RateLimitsPlugin',
-	grafast: {
-		middleware: {
-			prepareArgs(next, { args }) {
-				if(args.contextValue.ipAddress || !args.requestContext) {
-					return next()
-				}
-
-				args.contextValue.ipAddress = getRequestIp(
-					// @ts-expect-error -- types may differ
-					args.requestContext
-				)
-				return next()
-			},
-		}
-	},
 	gather: {
 		'hooks': {
 			'pgCodecs_PgCodec'(ctx, { pgCodec: { extensions } }) {
@@ -59,16 +54,21 @@ export const RateLimitsPlugin: GraphileConfig.Plugin = {
 				const {
 					scope: { fieldName, pgFieldResource: { codec } = {} }
 				} = ctx
-				if(!codec?.extensions?.rateLimits) {
+				if(!codec) {
 					return type
 				}
 
 				const applicableRateLimits = getRateLimitsToApply(
 					codec.extensions.rateLimits, build.options.rateLimits!, ctx
 				)
+
 				if(!applicableRateLimits?.length) {
 					return type
 				}
+
+				console.log(
+					`got ${applicableRateLimits.length} applicable rate limits for "${fieldName}" field`
+				)
 
 				// ensure the rateLimit type is defined
 				for(const { rateLimitName } of applicableRateLimits) {
@@ -82,7 +82,7 @@ export const RateLimitsPlugin: GraphileConfig.Plugin = {
 				const ogPlan = type.plan
 				type.plan = (plan, args, info) => {
 					sideEffect(context(), ctx => (
-						executeRateLimitStep(
+						applyRateLimits(
 							ctx,
 							fieldName,
 							applicableRateLimits,
@@ -105,7 +105,7 @@ export const RateLimitsPlugin: GraphileConfig.Plugin = {
 				const {
 					resolvedPreset: {
 						pgServices,
-						rateLimits: rateLimitsOpts = {},
+						rateLimits: rateLimitsOpts,
 					}
 				} = opts
 
@@ -123,14 +123,36 @@ export const RateLimitsPlugin: GraphileConfig.Plugin = {
 
 				await executeRateLimitsDdl(pool, rateLimitsOpts)
 
+				expiredLimiterClearer = new RateLimiterPostgres({
+					storeType: 'pool',
+					storeClient: pool,
+					schemaName: DEFAULT_SCHEMA_NAME,
+					tableName: rateLimitsOpts.rateLimitsTableName || DEFAULT_TABLE_NAME,
+					tableCreated: true,
+					clearExpiredByTimeout: true,
+				})
+
 				return next()
 			},
-			// async processRequest(next, event) {
-			// 	const final = await next()
-			// 	if(final?.type === 'graphql') {
-			//
-			// 	}
-			// },
 		}
-	}
+	},
+	grafast: {
+		middleware: {
+			prepareArgs(
+				next,
+				{ args: { contextValue, requestContext, resolvedPreset } }
+			) {
+				if(contextValue.ipAddress || !requestContext) {
+					return next()
+				}
+
+				contextValue.ipAddress = getRequestIp(
+					// @ts-expect-error -- types may differ
+					requestContext
+				)
+				contextValue.rateLimitsOpts = resolvedPreset?.rateLimits!
+				return next()
+			},
+		}
+	},
 }
