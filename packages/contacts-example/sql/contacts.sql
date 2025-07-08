@@ -97,6 +97,7 @@ ALTER TABLE app.contacts REPLICA IDENTITY FULL;
 
 comment on table app.contacts is $$
 @behaviour +subscribable
+@rateLimits connection:unauthenticated:5/60s
 $$;
 
 comment on column app.contacts.created_at is $$

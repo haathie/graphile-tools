@@ -13,6 +13,7 @@ GRANT
 	),
 	DELETE
 ON postgraphile_meta.subscriptions TO "app_user";
+
 -- Create RLS policies for subscriptions table
 DROP POLICY IF EXISTS app_user_subscriptions ON postgraphile_meta.subscriptions;
 CREATE POLICY app_user_subscriptions ON postgraphile_meta.subscriptions
@@ -22,3 +23,6 @@ USING (TRUE)
 WITH CHECK (
 	additional_data->'inputCondition'->>'teamId' = current_setting('app.org_id')
 );
+
+GRANT SELECT, INSERT, UPDATE, DELETE
+ON postgraphile_meta.rate_limits TO "app_user";

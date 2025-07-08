@@ -1,6 +1,7 @@
 import type {} from 'postgraphile'
 import { type PgCodecWithAttributes, PgResource } from 'postgraphile/@dataplan/pg'
 import { Modifier, Step } from 'postgraphile/grafast'
+import type {} from 'postgraphile/grafserv/express/v4'
 import { GraphQLInputObjectType, GraphQLObjectType, OperationTypeNode } from 'postgraphile/graphql'
 
 type _PgResource = PgResource<string, PgCodecWithAttributes>
@@ -57,4 +58,19 @@ export function isSubscriptionPlan(plan: Step | Modifier<any>) {
 
 	return plan.operationPlan.operation.operation
 		=== OperationTypeNode.SUBSCRIPTION
+}
+
+export function getRequestIp(args: Grafast.RequestContext) {
+	const ip = args.http?.getHeader('x-forwarded-for')
+		|| args.http?.getHeader('x-real-ip')
+	if(ip) {
+		return ip
+	}
+
+	const sock = args?.node?.req?.socket
+	if(!sock) {
+		return
+	}
+
+	return sock.remoteAddress
 }

@@ -2,6 +2,7 @@ import { PgSimplifyInflectionPreset } from '@graphile/simplify-inflection'
 import { FancyConditionsPlugin } from '@haathie/fancy-conditions'
 import { FancyMutationsPlugin } from '@haathie/fancy-mutations'
 import { FancySubscriptionsPlugin } from '@haathie/fancy-subscriptions'
+import { RateLimitsPlugin } from '@haathie/graphile-rate-limits'
 import { ReasonableLimitsPlugin } from '@haathie/graphile-reasonable-limits'
 import { makePgService } from 'postgraphile/adaptors/pg'
 // The standard base preset to use, includes the main PostGraphile features
@@ -17,6 +18,7 @@ const preset: GraphileConfig.Preset = {
 		ReasonableLimitsPlugin,
 		FancyMutationsPlugin,
 		FancyConditionsPlugin,
+		RateLimitsPlugin,
 	],
 	pgServices: [
 		/* list of PG database configurations, e.g.: */
@@ -64,6 +66,18 @@ const preset: GraphileConfig.Preset = {
 	grafast: { explain: true },
 	schema: {
 		defaultBehavior: '-single',
+		rateLimits: {
+			authenticated: {
+				default: { limit: 100, durationS: 60 },
+				getRateLimitingKey(ctx) {
+					if(!('app.org_id' in ctx) || typeof ctx['app.org_id'] !== 'string') {
+						throw new Error('No org_id in context for rate limiting')
+					}
+
+					return ctx['app.org_id']
+				},
+			}
+		},
 	},
 }
 
