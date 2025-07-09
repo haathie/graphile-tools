@@ -1,10 +1,11 @@
 import { getRequestIp } from '@haathie/graphile-common-utils'
+import { LRUCache } from 'lru-cache'
 import { Pool } from 'pg'
 import type {} from 'postgraphile'
 import type {} from 'postgraphile/adaptors/pg'
 import { context, sideEffect } from 'postgraphile/grafast'
 import { RateLimiterPostgres } from 'rate-limiter-flexible'
-import type { RateLimitsConfig } from './types.ts'
+import type { RateLimitsCache, RateLimitsConfig } from './types.ts'
 import { applyRateLimits, DEFAULT_SCHEMA_NAME, DEFAULT_TABLE_NAME, executeRateLimitsDdl, getRateLimitsDescription, getRateLimitsToApply, parseRateLimitTag } from './utils.ts'
 
 const RATE_LIMITS_TAG = 'rateLimits'
@@ -24,6 +25,7 @@ const UNAUTHENTICATED_RATE_LIMIT_CONFIG: RateLimitsConfig = {
 // in the background.
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 let expiredLimiterClearer: RateLimiterPostgres
+let customRateLimitsCache: RateLimitsCache | undefined
 
 export const RateLimitsPlugin: GraphileConfig.Plugin = {
 	name: 'RateLimitsPlugin',
@@ -184,6 +186,16 @@ export const RateLimitsPlugin: GraphileConfig.Plugin = {
 				}
 
 				contextValue.rateLimitsOpts = resolvedPreset?.rateLimits!
+				if(!customRateLimitsCache) {
+					customRateLimitsCache = new LRUCache({
+						max: 2000,
+						ttl: 10 * 60 * 1000, // 10 minutes
+						...resolvedPreset?.rateLimits?.customRateLimitsCacheOpts,
+					})
+				}
+
+				contextValue.customRateLimitsCache = customRateLimitsCache
+
 				return next()
 			},
 		}

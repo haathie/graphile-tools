@@ -1,4 +1,5 @@
-import { RateLimiterPostgres } from 'rate-limiter-flexible'
+import { LRUCache } from 'lru-cache'
+import { IRateLimiterPostgresOptions, RateLimiterPostgres } from 'rate-limiter-flexible'
 
 export interface RateLimit {
 	max: number
@@ -52,13 +53,21 @@ export type RateLimitsOptions = {
 	 */
 	rateLimitsTableName?: string
 	rateLimitsTableType?: 'unlogged' | 'logged'
+
+	rateLimiterPgOpts?: (limit: RateLimit) => Partial<IRateLimiterPostgresOptions>
 	/**
 	 * Tell us if the current request is authenticated.
 	 * The "unauthenticated" rate limiter will use this to determine
 	 * if it should apply the unauthenticated rate limits.
 	 */
 	isAuthenticated(ctx: Grafast.Context): boolean
+	/**
+	 * Specify default options for the rate limits.
+	 */
+	customRateLimitsCacheOpts?: LRUCache.Options<string, RateLimit, unknown>
 }
+
+export type RateLimitsCache = LRUCache<string, RateLimit>
 
 declare global {
 	namespace GraphileConfig {
@@ -71,6 +80,7 @@ declare global {
 		interface Context {
 			ipAddress?: string
 			rateLimitsOpts: RateLimitsOptions
+			customRateLimitsCache: RateLimitsCache
 		}
 	}
 

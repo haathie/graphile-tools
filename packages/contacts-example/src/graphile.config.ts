@@ -59,6 +59,7 @@ const preset: GraphileConfig.Preset = {
 		publishChanges: true
 	},
 	rateLimits: {
+		rateLimiterPgOpts: l => ({ inMemoryBlockOnConsumed: l.max }),
 		isAuthenticated(ctx) {
 			return !!ctx.pgSettings?.['app.user_id']
 		},

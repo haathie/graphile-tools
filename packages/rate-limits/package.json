@@ -16,6 +16,7 @@
 	},
 	"dependencies": {
 		"@haathie/graphile-common-utils": "*",
+		"lru-cache": "^11.1.0",
 		"rate-limiter-flexible": "^7.1.1"
 	}
 }

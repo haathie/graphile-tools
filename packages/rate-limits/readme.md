@@ -163,3 +163,34 @@ const preset: GraphileConfig.Preset = {
 	},
 }
 ```
+
+The custom rate limits returned are stored in memory via [lru-cache](https://www.npmjs.com/package/lru-cache) to avoid hitting the database/other sources for every request. You can also use the `customRateLimitsCacheOpts` property to configure the cache options.
+``` ts
+const preset: GraphileConfig.Preset = {
+	...otherOpts,
+	rateLimits: {
+		...moreRateLimitsOpts,
+		// cache the rate limits for 5 minutes
+		customRateLimitsCacheOpts: {
+			max: 1000, // maximum number of items in the cache
+			ttl: 5 * 60 * 1000, // 5 minutes
+		},
+	},
+}
+```
+
+### Customising the Rate Limiter
+
+You can customise the rate limiter options by providing a function that returns the options based on the rate limit.
+``` ts
+const preset: GraphileConfig.Preset = {
+	...otherOpts,
+	rateLimits: {
+		...moreRateLimitsOpts,
+		// customise the rate limiter options. We'll store all blocked keys in memory
+		// to avoid hitting the database for keys that are blocked.
+		// see: https://github.com/animir/node-rate-limiter-flexible/wiki/Overall-example#apply-in-memory-block-strategy-to-avoid-extra-requests-to-store
+		rateLimiterPgOpts: l => ({ inMemoryBlockOnConsumed: l.max }),
+	},
+}
+```

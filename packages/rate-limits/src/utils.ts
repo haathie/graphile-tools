@@ -3,6 +3,8 @@ import type {} from 'postgraphile'
 import type {} from 'postgraphile/adaptors/pg'
 import { GraphQLError } from 'postgraphile/graphql'
 import { RateLimiterPostgres, RateLimiterRes } from 'rate-limiter-flexible'
+// @ts-expect-error
+import BlockedKeys from 'rate-limiter-flexible/lib/component/BlockedKeys/index.js'
 import type { RateLimit, RateLimitParsedTag, RateLimitsConfig, RateLimitsConfigMap, RateLimitsOptions, RateLimitType } from './types.ts'
 
 type RateLimitableContext = GraphileBuild.ContextObjectFieldsField
@@ -16,6 +18,21 @@ type _RateLimiterInput = {
 
 export const DEFAULT_TABLE_NAME = 'rate_limits'
 export const DEFAULT_SCHEMA_NAME = 'postgraphile_meta'
+
+const DDL = `
+CREATE SCHEMA IF NOT EXISTS {{schema_name}};
+-- see: https://github.com/animir/node-rate-limiter-flexible/blob/2906f1a95e9b39d11e9706bdc19e210d11f815b5/lib/RateLimiterPostgres.js#L161
+CREATE {{table_type}} TABLE IF NOT EXISTS "{{schema_name}}"."{{table_name}}" (
+	key VARCHAR(255) PRIMARY KEY,
+	points INT NOT NULL DEFAULT 0,
+	expire BIGINT -- timestamp of expiry in ms
+);
+`
+
+// As we have a RateLimiterPostgres instance per request,
+// we need to ensure that the blocked keys are shared across all instances,
+// if in memory blocking is enabled
+const GLOBAL_BLOCKED_KEYS = new BlockedKeys()
 
 export async function executeRateLimitsDdl(
 	pool: Pool,
@@ -31,16 +48,6 @@ export async function executeRateLimitsDdl(
 	await pool.query(`BEGIN;\n${ddl}\nCOMMIT;`)
 }
 
-const DDL = `
-CREATE SCHEMA IF NOT EXISTS {{schema_name}};
--- see: https://github.com/animir/node-rate-limiter-flexible/blob/2906f1a95e9b39d11e9706bdc19e210d11f815b5/lib/RateLimiterPostgres.js#L161
-CREATE {{table_type}} TABLE IF NOT EXISTS "{{schema_name}}"."{{table_name}}" (
-	key VARCHAR(255) PRIMARY KEY,
-	points INT NOT NULL DEFAULT 0,
-	expire BIGINT -- timestamp of expiry in ms
-);
-`
-
 export async function applyRateLimits(
 	ctx: Grafast.Context,
 	apiName: string,
@@ -50,7 +57,11 @@ export async function applyRateLimits(
 	const {
 		pgSettings,
 		withPgClient,
-		rateLimitsOpts: { rateLimitsTableName = DEFAULT_TABLE_NAME },
+		rateLimitsOpts: {
+			rateLimitsTableName = DEFAULT_TABLE_NAME,
+			rateLimiterPgOpts
+		},
+		customRateLimitsCache
 	} = ctx
 	const finalLimits: _RateLimiterInput[] = []
 	for(const rateLimit of rateLimits) {
@@ -61,7 +72,8 @@ export async function applyRateLimits(
 			continue // no key to limit
 		}
 
-		const customLimit = await getRateLimit?.(key, ctx)
+		const customLimitCached = customRateLimitsCache?.get(key)
+		const customLimit = customLimitCached || await getRateLimit?.(key, ctx)
 		const limit = customLimit
 			|| rateLimit.limit
 			|| configs[rateLimitName].default
@@ -75,6 +87,11 @@ export async function applyRateLimits(
 			key,
 			apiName,
 		})
+
+		if(customLimit && !customLimitCached) {
+			// set the custom limit in the cache
+			customRateLimitsCache?.set(key, customLimit)
+		}
 
 		console.debug(
 			{ key, limit, name: rateLimitName, apiName, isCustom: !!customLimit },
@@ -99,7 +116,10 @@ export async function applyRateLimits(
 				duration: limit.durationS,
 				keyPrefix: name + '_' + apiName,
 				clearExpiredByTimeout: false,
+				...rateLimiterPgOpts?.(limit)
 			})
+			// @ts-expect-error -- share blocked keys globally, hack.
+			limiter['_inMemoryBlockedKeys'] = GLOBAL_BLOCKED_KEYS
 
 			try {
 				await limiter.consume(key)
@@ -121,9 +141,11 @@ function mapResToError(
 	res: RateLimiterRes,
 	{ limit, key, name, apiName }: _RateLimiterInput
 ): GraphQLError {
+	// consumedPoints is set to 0, when in memory blocking is enabled
+	const consumed = res.consumedPoints || limit.max
 	return new GraphQLError(
 		`You (${key}) have exceeded the "${name}" rate limit for "${apiName}". `
-		+ `${res.consumedPoints}/${limit.max} points consumed over ${limit.durationS}s`,
+		+ `${consumed}/${limit.max} points consumed over ${limit.durationS}s`,
 		{
 			extensions: {
 				statusCode: 429,
