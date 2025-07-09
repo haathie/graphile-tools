@@ -5,12 +5,12 @@ import type {} from 'postgraphile/adaptors/pg'
 import { context, sideEffect } from 'postgraphile/grafast'
 import { RateLimiterPostgres } from 'rate-limiter-flexible'
 import type { RateLimitsConfig } from './types.ts'
-import { applyRateLimits, DEFAULT_SCHEMA_NAME, DEFAULT_TABLE_NAME, executeRateLimitsDdl, getRateLimitsToApply, parseRateLimitTag } from './utils.ts'
+import { applyRateLimits, DEFAULT_SCHEMA_NAME, DEFAULT_TABLE_NAME, executeRateLimitsDdl, getRateLimitsDescription, getRateLimitsToApply, parseRateLimitTag } from './utils.ts'
 
 const RATE_LIMITS_TAG = 'rateLimits'
 
 const UNAUTHENTICATED_RATE_LIMIT_CONFIG: RateLimitsConfig = {
-	'default': { limit: 60, durationS: 60 },
+	'default': { max: 60, durationS: 60 },
 	getRateLimitingKey(ctx) {
 		if(ctx.rateLimitsOpts.isAuthenticated(ctx)) {
 			return
@@ -37,6 +37,15 @@ export const RateLimitsPlugin: GraphileConfig.Plugin = {
 				}
 
 				extensions.rateLimits = rateLimits
+			},
+			'pgCodecs_attribute'(ctx, { attribute: { extensions } }) {
+				const rateLimits
+					= parseRateLimitTag(extensions?.tags?.[RATE_LIMITS_TAG])
+				if(!rateLimits || !extensions) {
+					return
+				}
+
+				extensions.rateLimits = rateLimits
 			}
 		}
 	},
@@ -44,7 +53,11 @@ export const RateLimitsPlugin: GraphileConfig.Plugin = {
 		hooks: {
 			'build'(build) {
 				build.options.rateLimits = {
-					unauthenticated: UNAUTHENTICATED_RATE_LIMIT_CONFIG,
+					unauthenticated: {
+						...UNAUTHENTICATED_RATE_LIMIT_CONFIG,
+						default: build.options.defaultUnauthenticatedLimit
+							|| UNAUTHENTICATED_RATE_LIMIT_CONFIG.default,
+					},
 					...build.options.rateLimits,
 				}
 
@@ -52,31 +65,52 @@ export const RateLimitsPlugin: GraphileConfig.Plugin = {
 			},
 			'GraphQLObjectType_fields_field'(type, build, ctx) {
 				const {
-					scope: { fieldName, pgFieldResource: { codec } = {} }
+					scope: {
+						fieldName,
+						pgFieldResource: { codec: recordCodec } = {},
+						pgFieldAttribute
+					},
+					Self
 				} = ctx
-				if(!codec) {
+				if(!recordCodec && !pgFieldAttribute) {
 					return type
 				}
 
+				const rlsTags = recordCodec?.extensions?.rateLimits
+					|| pgFieldAttribute?.extensions?.rateLimits
+				const {
+					options: { rateLimits = {}, addRateLimitsToDescription }
+				} = build
 				const applicableRateLimits = getRateLimitsToApply(
-					codec.extensions.rateLimits, build.options.rateLimits!, ctx
+					rlsTags, rateLimits, ctx
 				)
 
 				if(!applicableRateLimits?.length) {
 					return type
 				}
 
+				const apiName = `${Self.name}.${fieldName}`
 				console.log(
-					`got ${applicableRateLimits.length} applicable rate limits for "${fieldName}" field`
+					`got ${applicableRateLimits.length} applicable rate`
+						+ ` limits for "${apiName}" field`,
 				)
 
 				// ensure the rateLimit type is defined
 				for(const { rateLimitName } of applicableRateLimits) {
-					if(!build.options.rateLimits?.[rateLimitName]) {
+					if(!rateLimits[rateLimitName]) {
 						throw new Error(
 							`Rate limit "${rateLimitName}" is not defined in the options.`
 						)
 					}
+				}
+
+				if(addRateLimitsToDescription !== false) {
+					const rlsDesc = getRateLimitsDescription(
+						applicableRateLimits, rateLimits
+					)
+					type.description = type.description
+						? `${type.description}\n${rlsDesc}`
+						: rlsDesc
 				}
 
 				const ogPlan = type.plan
@@ -84,7 +118,7 @@ export const RateLimitsPlugin: GraphileConfig.Plugin = {
 					sideEffect(context(), ctx => (
 						applyRateLimits(
 							ctx,
-							fieldName,
+							apiName,
 							applicableRateLimits,
 							build.options.rateLimits!
 						)
@@ -142,14 +176,13 @@ export const RateLimitsPlugin: GraphileConfig.Plugin = {
 				next,
 				{ args: { contextValue, requestContext, resolvedPreset } }
 			) {
-				if(contextValue.ipAddress || !requestContext) {
-					return next()
+				if(!contextValue.ipAddress && requestContext) {
+					contextValue.ipAddress = getRequestIp(
+						// @ts-expect-error -- types may differ
+						requestContext
+					)
 				}
 
-				contextValue.ipAddress = getRequestIp(
-					// @ts-expect-error -- types may differ
-					requestContext
-				)
 				contextValue.rateLimitsOpts = resolvedPreset?.rateLimits!
 				return next()
 			},

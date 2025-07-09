@@ -102,6 +102,7 @@ $$;
 
 comment on column app.contacts.created_at is $$
 @behaviour filterType:range filterMethod:paradedb
+@rateLimits field:authenticated:3/60s
 $$;
 
 comment on column app.contacts.id is $$

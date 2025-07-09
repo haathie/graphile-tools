@@ -71,9 +71,10 @@ const preset: GraphileConfig.Preset = {
 	grafast: { explain: true },
 	schema: {
 		defaultBehavior: '-single',
+		addRateLimitsToDescription: true,
 		rateLimits: {
 			authenticated: {
-				default: { limit: 10, durationS: 60 },
+				default: { max: 10, durationS: 60 },
 				getRateLimitingKey({ pgSettings }) {
 					return pgSettings?.['app.org_id']
 				},

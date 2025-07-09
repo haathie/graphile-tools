@@ -1,11 +1,11 @@
 import { RateLimiterPostgres } from 'rate-limiter-flexible'
 
 export interface RateLimit {
-	limit: number
+	max: number
 	durationS: number // in seconds
 }
 
-export type RateLimitType = 'connection' | 'create'
+export type RateLimitType = 'connection' | 'create' | 'field'
 
 export interface RateLimitsConfig {
 	/**
@@ -24,7 +24,10 @@ export interface RateLimitsConfig {
 	/**
 	 * Potentially override the default rate limit for this key.
 	 */
-	getRateLimit?(key: string): Promise<RateLimit | undefined> | RateLimit | undefined
+	getRateLimit?(
+		key: string,
+		ctx: Grafast.Context
+	): Promise<RateLimit | undefined> | RateLimit | undefined
 }
 
 export type RateLimitParsedTag = {
@@ -78,12 +81,23 @@ declare global {
 		}
 
 		interface SchemaOptions {
+			/**
+			 * Mention applicable rate limits in the GraphQL type description.
+			 * @default true
+			 */
+			addRateLimitsToDescription?: boolean
+
+			defaultUnauthenticatedLimit?: RateLimit
 			rateLimits?: RateLimitsConfigMap
 		}
 	}
 
 	namespace DataplanPg {
 		interface PgCodecExtensions {
+			rateLimits?: RateLimitParsedTag[]
+		}
+
+		interface PgCodecAttributeExtensions {
 			rateLimits?: RateLimitParsedTag[]
 		}
 	}

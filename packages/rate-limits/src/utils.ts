@@ -61,7 +61,7 @@ export async function applyRateLimits(
 			continue // no key to limit
 		}
 
-		const customLimit = await getRateLimit?.(key)
+		const customLimit = await getRateLimit?.(key, ctx)
 		const limit = customLimit
 			|| rateLimit.limit
 			|| configs[rateLimitName].default
@@ -95,10 +95,10 @@ export async function applyRateLimits(
 				schemaName: DEFAULT_SCHEMA_NAME,
 				tableName: rateLimitsTableName,
 				tableCreated: true,
-				points: limit.limit,
+				points: limit.max,
 				duration: limit.durationS,
 				keyPrefix: name + '_' + apiName,
-				clearExpiredByTimeout: false
+				clearExpiredByTimeout: false,
 			})
 
 			try {
@@ -123,19 +123,36 @@ function mapResToError(
 ): GraphQLError {
 	return new GraphQLError(
 		`You (${key}) have exceeded the "${name}" rate limit for "${apiName}". `
-		+ `${res.consumedPoints}/${limit.limit} points consumed over ${limit.durationS}s`,
+		+ `${res.consumedPoints}/${limit.max} points consumed over ${limit.durationS}s`,
 		{
 			extensions: {
 				statusCode: 429,
 				headers: {
 					'Retry-After': res.msBeforeNext / 1000,
-					'X-RateLimit-Limit': limit.limit,
+					'X-RateLimit-Limit': limit.max,
 					'X-RateLimit-Remaining': res.remainingPoints,
 					'X-RateLimit-Reset': Math.ceil((Date.now() + res.msBeforeNext) / 1000)
 				}
 			}
 		}
 	)
+}
+
+export function getRateLimitsDescription(
+	rateLimits: RateLimitParsedTag[],
+	configs: RateLimitsConfigMap
+) {
+	const strs = ['**@rateLimits**']
+	for(const { rateLimitName, limit: limitInp } of rateLimits) {
+		const limit = limitInp || configs[rateLimitName]?.default
+		if(!limit) {
+			continue // no limit defined
+		}
+
+		strs.push(`${rateLimitName}: ${limit.max}/${limit.durationS}s`)
+	}
+
+	return strs.join('\n')
 }
 
 /**
@@ -186,7 +203,8 @@ function parseDuration(durationStr: string): RateLimit | undefined {
 	}
 
 	return {
-		limit: parseInt(limit, 10),
+		max: parseInt(limit, 10),
+		// TODO: parse duration string to seconds
 		durationS: parseInt(duration, 10)
 	}
 }
@@ -240,9 +258,15 @@ function *getRateLimitTypes(
 		const {
 			isConnectionType,
 			isPgFieldConnection,
+			pgCodec,
+			pgFieldAttribute
 		} = scope
 		if(isConnectionType || isPgFieldConnection) {
 			yield 'connection'
+		}
+
+		if(pgCodec && pgFieldAttribute) {
+			yield 'field'
 		}
 
 		break
