@@ -7,7 +7,7 @@
 		"@haathie/fancy-subscriptions": "*",
 		"@haathie/fancy-mutations": "*",
 		"@haathie/fancy-conditions": "*",
-		"@haathie/graphile-rate-limits": "*",
+		"@haathie/postgraphile-rate-limits": "*",
 		"@graphile/simplify-inflection": "^8.0.0-beta.7",
 		"express": "^5.1.0",
 		"http-terminator": "^3.2.0"

@@ -1,5 +1,5 @@
 {
-	"name": "@haathie/graphile-rate-limits",
+	"name": "@haathie/postgraphile-rate-limits",
 	"version": "0.1.0",
 	"type": "module",
 	"files": [

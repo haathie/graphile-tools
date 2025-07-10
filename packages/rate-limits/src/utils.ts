@@ -69,11 +69,13 @@ export async function applyRateLimits(
 	const {
 		pgSettings,
 		withPgClient,
-		rateLimitsOpts: {
-			rateLimitsTableName = DEFAULT_TABLE_NAME,
-			rateLimiterPgOpts
-		},
-		customRateLimitsCache
+		haathieRateLimits: {
+			opts: {
+				rateLimitsTableName = DEFAULT_TABLE_NAME,
+				rateLimiterPgOpts
+			} = {},
+			customRateLimitsCache
+		} = {},
 	} = ctx
 	const finalLimits: _RateLimiterInput[] = []
 	for(const rateLimit of rateLimits) {

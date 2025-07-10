@@ -2,8 +2,8 @@ import { PgSimplifyInflectionPreset } from '@graphile/simplify-inflection'
 import { FancyConditionsPlugin } from '@haathie/fancy-conditions'
 import { FancyMutationsPlugin } from '@haathie/fancy-mutations'
 import { FancySubscriptionsPlugin } from '@haathie/fancy-subscriptions'
-import { RateLimitsPlugin } from '@haathie/graphile-rate-limits'
 import { ReasonableLimitsPlugin } from '@haathie/graphile-reasonable-limits'
+import { RateLimitsPlugin } from '@haathie/postgraphile-rate-limits'
 import { makePgService } from 'postgraphile/adaptors/pg'
 // The standard base preset to use, includes the main PostGraphile features
 import { PostGraphileAmberPreset } from 'postgraphile/presets/amber'
@@ -58,13 +58,6 @@ const preset: GraphileConfig.Preset = {
 		deviceId: process.env.DEVICE_ID || 'default-device',
 		publishChanges: true
 	},
-	rateLimits: {
-		rateLimiterPgOpts: l => ({ inMemoryBlockOnConsumed: l.max }),
-		rolesToGiveAccessTo: ['app_user'],
-		isAuthenticated(ctx) {
-			return !!ctx.pgSettings?.['app.user_id']
-		},
-	},
 	grafserv: {
 		// watch: true,
 		websockets: true,
@@ -73,15 +66,22 @@ const preset: GraphileConfig.Preset = {
 	grafast: { explain: true },
 	schema: {
 		defaultBehavior: '-single',
-		addRateLimitsToDescription: true,
-		rateLimits: {
-			authenticated: {
-				default: { max: 10, durationS: 60 },
-				getRateLimitingKey({ pgSettings }) {
-					return pgSettings?.['app.org_id']
-				},
-			}
-		},
+		haathieRateLimits: {
+			rateLimiterPgOpts: l => ({ inMemoryBlockOnConsumed: l.max }),
+			rolesToGiveAccessTo: ['app_user'],
+			isAuthenticated(ctx) {
+				return !!ctx.pgSettings?.['app.user_id']
+			},
+			addRateLimitsToDescription: true,
+			rateLimitsConfig: {
+				authenticated: {
+					default: { max: 10, durationS: 60 },
+					getRateLimitingKey({ pgSettings }) {
+						return pgSettings?.['app.org_id']
+					},
+				}
+			},
+		}
 	},
 }
 

@@ -13,11 +13,12 @@ const RATE_LIMITS_TAG = 'rateLimits'
 const UNAUTHENTICATED_RATE_LIMIT_CONFIG: RateLimitsConfig = {
 	'default': { max: 60, durationS: 60 },
 	getRateLimitingKey(ctx) {
-		if(ctx.rateLimitsOpts.isAuthenticated(ctx)) {
+		const { ipAddress, haathieRateLimits } = ctx
+		if(haathieRateLimits?.opts?.isAuthenticated(ctx)) {
 			return
 		}
 
-		return ctx.ipAddress || 'unknown-ip'
+		return ipAddress || 'unknown-ip'
 	}
 }
 
@@ -38,7 +39,7 @@ export const RateLimitsPlugin: GraphileConfig.Plugin = {
 					return
 				}
 
-				extensions.rateLimits = rateLimits
+				extensions.haathieRateLimits = rateLimits
 			},
 			'pgCodecs_attribute'(ctx, { attribute: { extensions } }) {
 				const rateLimits
@@ -47,20 +48,26 @@ export const RateLimitsPlugin: GraphileConfig.Plugin = {
 					return
 				}
 
-				extensions.rateLimits = rateLimits
+				extensions.haathieRateLimits = rateLimits
 			}
 		}
 	},
 	schema: {
 		hooks: {
 			'build'(build) {
-				build.options.rateLimits = {
+				const { options: { haathieRateLimits } } = build
+				if(!haathieRateLimits) {
+					// no rate limits configured, skip
+					return build
+				}
+
+				haathieRateLimits.rateLimitsConfig = {
 					unauthenticated: {
 						...UNAUTHENTICATED_RATE_LIMIT_CONFIG,
-						default: build.options.defaultUnauthenticatedLimit
+						default: haathieRateLimits.defaultUnauthenticatedLimit
 							|| UNAUTHENTICATED_RATE_LIMIT_CONFIG.default,
 					},
-					...build.options.rateLimits,
+					...haathieRateLimits.rateLimitsConfig,
 				}
 
 				return build
@@ -78,13 +85,18 @@ export const RateLimitsPlugin: GraphileConfig.Plugin = {
 					return type
 				}
 
-				const rlsTags = recordCodec?.extensions?.rateLimits
-					|| pgFieldAttribute?.extensions?.rateLimits
+				const rlsTags = recordCodec?.extensions?.haathieRateLimits
+					|| pgFieldAttribute?.extensions?.haathieRateLimits
 				const {
-					options: { rateLimits = {}, addRateLimitsToDescription }
+					options: {
+						haathieRateLimits: {
+							rateLimitsConfig = {},
+							addRateLimitsToDescription
+						} = {}
+					}
 				} = build
 				const applicableRateLimits = getRateLimitsToApply(
-					rlsTags, rateLimits, ctx
+					rlsTags, rateLimitsConfig, ctx
 				)
 
 				if(!applicableRateLimits?.length) {
@@ -99,7 +111,7 @@ export const RateLimitsPlugin: GraphileConfig.Plugin = {
 
 				// ensure the rateLimit type is defined
 				for(const { rateLimitName } of applicableRateLimits) {
-					if(!rateLimits[rateLimitName]) {
+					if(!rateLimitsConfig[rateLimitName]) {
 						throw new Error(
 							`Rate limit "${rateLimitName}" is not defined in the options.`
 						)
@@ -108,7 +120,7 @@ export const RateLimitsPlugin: GraphileConfig.Plugin = {
 
 				if(addRateLimitsToDescription !== false) {
 					const rlsDesc = getRateLimitsDescription(
-						applicableRateLimits, rateLimits
+						applicableRateLimits, rateLimitsConfig
 					)
 					type.description = type.description
 						? `${type.description}\n${rlsDesc}`
@@ -122,7 +134,7 @@ export const RateLimitsPlugin: GraphileConfig.Plugin = {
 							ctx,
 							apiName,
 							applicableRateLimits,
-							build.options.rateLimits!
+							rateLimitsConfig
 						)
 					))
 					return ogPlan?.(plan, args, info) || plan
@@ -141,9 +153,14 @@ export const RateLimitsPlugin: GraphileConfig.Plugin = {
 				const {
 					resolvedPreset: {
 						pgServices,
-						rateLimits: rateLimitsOpts,
+						schema: { haathieRateLimits } = {}
 					}
 				} = opts
+
+				if(!haathieRateLimits) {
+					// no rate limits configured, skip
+					return next()
+				}
 
 				let pool: Pool | undefined
 				for(const service of pgServices || []) {
@@ -157,13 +174,13 @@ export const RateLimitsPlugin: GraphileConfig.Plugin = {
 					throw new Error('RateLimitsPlugin requires a PG pool to be configured.')
 				}
 
-				await executeRateLimitsDdl(pool, rateLimitsOpts)
+				await executeRateLimitsDdl(pool, haathieRateLimits)
 
 				expiredLimiterClearer = new RateLimiterPostgres({
 					storeType: 'pool',
 					storeClient: pool,
 					schemaName: DEFAULT_SCHEMA_NAME,
-					tableName: rateLimitsOpts.rateLimitsTableName || DEFAULT_TABLE_NAME,
+					tableName: haathieRateLimits.rateLimitsTableName || DEFAULT_TABLE_NAME,
 					tableCreated: true,
 					clearExpiredByTimeout: true,
 				})
@@ -176,7 +193,7 @@ export const RateLimitsPlugin: GraphileConfig.Plugin = {
 		middleware: {
 			prepareArgs(
 				next,
-				{ args: { contextValue, requestContext, resolvedPreset } }
+				{ args: { contextValue, requestContext, resolvedPreset: { schema } = {} } }
 			) {
 				if(!contextValue.ipAddress && requestContext) {
 					contextValue.ipAddress = getRequestIp(
@@ -185,16 +202,22 @@ export const RateLimitsPlugin: GraphileConfig.Plugin = {
 					)
 				}
 
-				contextValue.rateLimitsOpts = resolvedPreset?.rateLimits!
+				if(!schema?.haathieRateLimits) {
+					return next()
+				}
+
 				if(!customRateLimitsCache) {
 					customRateLimitsCache = new LRUCache({
 						max: 2000,
 						ttl: 10 * 60 * 1000, // 10 minutes
-						...resolvedPreset?.rateLimits?.customRateLimitsCacheOpts,
+						...schema?.haathieRateLimits?.customRateLimitsCacheOpts,
 					})
 				}
 
-				contextValue.customRateLimitsCache = customRateLimitsCache
+				contextValue.haathieRateLimits = {
+					opts: schema.haathieRateLimits,
+					customRateLimitsCache
+				}
 
 				return next()
 			},

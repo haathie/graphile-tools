@@ -71,22 +71,31 @@ export type RateLimitsOptions = {
 	 * Specify default options for the rate limits.
 	 */
 	customRateLimitsCacheOpts?: LRUCache.Options<string, RateLimit, unknown>
+
+	/**
+	 * Mention applicable rate limits in the GraphQL type description.
+	 * @default true
+	 */
+	addRateLimitsToDescription?: boolean
+
+	defaultUnauthenticatedLimit?: RateLimit
+	/**
+	 * Configure different rate limit types
+	 */
+	rateLimitsConfig?: RateLimitsConfigMap
 }
 
 export type RateLimitsCache = LRUCache<string, RateLimit>
 
 declare global {
-	namespace GraphileConfig {
-		interface Preset {
-			rateLimits: RateLimitsOptions
-		}
-	}
 
 	namespace Grafast {
 		interface Context {
+			haathieRateLimits?: {
+				opts: RateLimitsOptions
+				customRateLimitsCache: RateLimitsCache
+			}
 			ipAddress?: string
-			rateLimitsOpts: RateLimitsOptions
-			customRateLimitsCache: RateLimitsCache
 		}
 	}
 
@@ -97,24 +106,17 @@ declare global {
 		}
 
 		interface SchemaOptions {
-			/**
-			 * Mention applicable rate limits in the GraphQL type description.
-			 * @default true
-			 */
-			addRateLimitsToDescription?: boolean
-
-			defaultUnauthenticatedLimit?: RateLimit
-			rateLimits?: RateLimitsConfigMap
+			haathieRateLimits?: RateLimitsOptions
 		}
 	}
 
 	namespace DataplanPg {
 		interface PgCodecExtensions {
-			rateLimits?: RateLimitParsedTag[]
+			haathieRateLimits?: RateLimitParsedTag[]
 		}
 
 		interface PgCodecAttributeExtensions {
-			rateLimits?: RateLimitParsedTag[]
+			haathieRateLimits?: RateLimitParsedTag[]
 		}
 	}
 }

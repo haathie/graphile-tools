@@ -7,11 +7,11 @@ This is built on top of [rate-limiter-flexible](https://github.com/animir/node-r
 
 1. Install the plugin:
 ``` sh
-npm i @haathie/graphile-rate-limits
+npm i @haathie/postgraphile-rate-limits
 ```
 2. Add the plugin to your PostGraphile setup. You can define various rate imit types and their limits in the configuration.
 ``` ts
-import { RateLimitsPlugin } from '@haathie/graphile-rate-limits';
+import { RateLimitsPlugin } from '@haathie/postgraphile-rate-limits';
 
 const preset: GraphileConfig.Preset = {
 	presets: [...presets],
@@ -19,42 +19,42 @@ const preset: GraphileConfig.Preset = {
 		RateLimitsPlugin,
 		...otherPlugins
 	],
-	rateLimits: {
-		// name of the table to store rate limits
-		rateLimitsTableName: 'rate_limits',
-		// type of the table, can be 'unlogged' or 'logged'. Trade
-		// durability for performance when using 'unlogged'.
-		rateLimitsTableType: 'unlogged',
-		// specify which roles must be given access to read/write to the rate limits table.
-		// Enter the roles that the Graphile requests will be made with.
-		rolesToGiveAccessTo: ['app_user'],
-		// tell the plugin if the current request is authenticated
-		// this is used to determine if unauthenticated rate limits should be applied
-		isAuthenticated: (ctx) => !!ctx.user,
-	},
 	schema: {
-		// add rate limits to the GraphQL type description
-		// eg. will print something like:
-		// @rateLimits
-		// unauthenticated: 10/60s
-		// authenticated: 100/60s
-		addRateLimitsToDescription: true,
-		// 10 requests per minute for all unauthenticated queries, mutations, and subscriptions
-		defaultUnauthenticatedLimit: { max: 10, durationS: 60 },
-		rateLimits: {
-			authenticated: {
-				// set the default rate limits for authenticated users
-				// this is applied automatically to all root level fields
-				// i.e. queries, mutations, and subscriptions
-				// To disable this behaviour, leave "undefined"
-				default: { max: 100, durationS: 60 }, // 100 requests per minute
-				// get the rate limiting key for authenticated users. If undefined,
-				// then this rate limit will not be applied
-				getRateLimitingKey({ user }) {
-					return user?.id
-				},
+		haathieRateLimits: {
+			// name of the table to store rate limits
+			rateLimitsTableName: 'rate_limits',
+			// type of the table, can be 'unlogged' or 'logged'. Trade
+			// durability for performance when using 'unlogged'.
+			rateLimitsTableType: 'unlogged',
+			// specify which roles must be given access to read/write to the rate limits table.
+			// Enter the roles that the Graphile requests will be made with.
+			rolesToGiveAccessTo: ['app_user'],
+			// tell the plugin if the current request is authenticated
+			// this is used to determine if unauthenticated rate limits should be applied
+			isAuthenticated: (ctx) => !!ctx.user,
+			// add rate limits to the GraphQL type description
+			// eg. will print something like:
+			// @rateLimits
+			// unauthenticated: 10/60s
+			// authenticated: 100/60s
+			addRateLimitsToDescription: true,
+			// 10 requests per minute for all unauthenticated queries, mutations, and subscriptions
+			defaultUnauthenticatedLimit: { max: 10, durationS: 60 },
+			rateLimits: {
+				authenticated: {
+					// set the default rate limits for authenticated users
+					// this is applied automatically to all root level fields
+					// i.e. queries, mutations, and subscriptions
+					// To disable this behaviour, leave "undefined"
+					default: { max: 100, durationS: 60 }, // 100 requests per minute
+					// get the rate limiting key for authenticated users. If undefined,
+					// then this rate limit will not be applied
+					getRateLimitingKey({ user }) {
+						return user?.id
+					},
+				}
 			}
-		}
+		},
 	},
 	..otherOpts
 }
@@ -137,29 +137,31 @@ const preset: GraphileConfig.Preset = {
 	...otherOpts,
 	schema: {
 		..otherSchemaOpts,
-		rateLimits: {
-			authenticated: {
-				// set the default rate limits for authenticated users
-				// this is applied automatically to all root level fields
-				// i.e. queries, mutations, and subscriptions
-				// To disable this behaviour, leave "undefined"
-				default: { max: 100, durationS: 60 }, // 100 requests per minute
-				// get the rate limiting key for authenticated users. If undefined,
-				// then this rate limit will not be applied
-				getRateLimitingKey({ user }) {
-					return user?.id
-				},
-				getRateLimit(key, { pgSettings, withPgClient }) {
-					return withPgClient(pgSettings, async (pgClient) => {
-						// fetch the rate limit for the user from the database
-						const { rows: [row] } = await pgClient.query({
-							text: 
-							`SELECT max, duration_s as "durationS"
-							FROM user_rate_limits WHERE user_id = $1`,
-							values: [key]
+		haathieRateLimits: {
+			rateLimitsConfig: {
+				authenticated: {
+					// set the default rate limits for authenticated users
+					// this is applied automatically to all root level fields
+					// i.e. queries, mutations, and subscriptions
+					// To disable this behaviour, leave "undefined"
+					default: { max: 100, durationS: 60 }, // 100 requests per minute
+					// get the rate limiting key for authenticated users. If undefined,
+					// then this rate limit will not be applied
+					getRateLimitingKey({ user }) {
+						return user?.id
+					},
+					getRateLimit(key, { pgSettings, withPgClient }) {
+						return withPgClient(pgSettings, async (pgClient) => {
+							// fetch the rate limit for the user from the database
+							const { rows: [row] } = await pgClient.query({
+								text: 
+								`SELECT max, duration_s as "durationS"
+								FROM user_rate_limits WHERE user_id = $1`,
+								values: [key]
+							});
+							return row
 						});
-						return row
-					});
+					}
 				}
 			}
 		}
@@ -171,14 +173,16 @@ The custom rate limits returned are stored in memory via [lru-cache](https://www
 ``` ts
 const preset: GraphileConfig.Preset = {
 	...otherOpts,
-	rateLimits: {
-		...moreRateLimitsOpts,
-		// cache the rate limits for 5 minutes
-		customRateLimitsCacheOpts: {
-			max: 1000, // maximum number of items in the cache
-			ttl: 5 * 60 * 1000, // 5 minutes
+	schema: {
+		haathieRateLimits: {
+			...moreRateLimitsOpts,
+			// cache the rate limits for 5 minutes
+			customRateLimitsCacheOpts: {
+				max: 1000, // maximum number of items in the cache
+				ttl: 5 * 60 * 1000, // 5 minutes
+			},
 		},
-	},
+	}
 }
 ```
 
@@ -188,12 +192,14 @@ You can customise the rate limiter options by providing a function that returns 
 ``` ts
 const preset: GraphileConfig.Preset = {
 	...otherOpts,
-	rateLimits: {
-		...moreRateLimitsOpts,
-		// customise the rate limiter options. We'll store all blocked keys in memory
-		// to avoid hitting the database for keys that are blocked.
-		// see: https://github.com/animir/node-rate-limiter-flexible/wiki/Overall-example#apply-in-memory-block-strategy-to-avoid-extra-requests-to-store
-		rateLimiterPgOpts: l => ({ inMemoryBlockOnConsumed: l.max }),
-	},
+	schema: {
+		haathieRateLimits: {
+			...moreRateLimitsOpts,
+			// customise the rate limiter options. We'll store all blocked keys in memory
+			// to avoid hitting the database for keys that are blocked.
+			// see: https://github.com/animir/node-rate-limiter-flexible/wiki/Overall-example#apply-in-memory-block-strategy-to-avoid-extra-requests-to-store
+			rateLimiterPgOpts: l => ({ inMemoryBlockOnConsumed: l.max }),
+		},
+	}
 }
 ```
