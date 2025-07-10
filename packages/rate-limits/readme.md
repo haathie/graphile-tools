@@ -25,6 +25,9 @@ const preset: GraphileConfig.Preset = {
 		// type of the table, can be 'unlogged' or 'logged'. Trade
 		// durability for performance when using 'unlogged'.
 		rateLimitsTableType: 'unlogged',
+		// specify which roles must be given access to read/write to the rate limits table.
+		// Enter the roles that the Graphile requests will be made with.
+		rolesToGiveAccessTo: ['app_user'],
 		// tell the plugin if the current request is authenticated
 		// this is used to determine if unauthenticated rate limits should be applied
 		isAuthenticated: (ctx) => !!ctx.user,
