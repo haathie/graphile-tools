@@ -1,6 +1,6 @@
 services:
   postgres:
-    image: haathie/postgres:f859711de2c17d1f5757e645a9515b32598f9c10
+    image: ghcr.io/haathie/postgres:17
     environment:
       POSTGRES_PASSWORD: ''
       POSTGRES_HOST_AUTH_METHOD: trust

@@ -23,6 +23,3 @@ USING (TRUE)
 WITH CHECK (
 	additional_data->'inputCondition'->>'teamId' = current_setting('app.org_id')
 );
-
-GRANT SELECT, INSERT, UPDATE, DELETE
-ON postgraphile_meta.rate_limits TO "app_user";

@@ -1,6 +1,9 @@
 DROP SCHEMA IF EXISTS app CASCADE;
 CREATE SCHEMA IF NOT EXISTS app;
 
+-- search index for contacts_search
+CREATE EXTENSION IF NOT EXISTS pg_search;
+
 DO $$
 BEGIN
 	-- create app_user role if it doesn't exist
@@ -128,7 +131,6 @@ $$ language 'plpgsql';
 CREATE TRIGGER set_updated_at_trigger
 	BEFORE UPDATE ON app.contacts
 	FOR EACH ROW
-	WHEN (OLD IS DISTINCT FROM NEW)
 	EXECUTE FUNCTION app.set_updated_at();
 
 -- Trigger function to handle assignment tracking
@@ -194,9 +196,6 @@ WITH CHECK (
 );
 
 -- Create a search index on the contacts table
-
--- search index for contacts_search
-CREATE EXTENSION IF NOT EXISTS pg_search;
 
 CREATE INDEX IF NOT EXISTS
 	contacts_search_idx ON app.contacts
