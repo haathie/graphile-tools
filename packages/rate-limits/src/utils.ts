@@ -39,12 +39,24 @@ export async function executeRateLimitsDdl(
 	{
 		rateLimitsTableName = DEFAULT_TABLE_NAME,
 		rateLimitsTableType = 'unlogged',
-	}: RateLimitsOptions
+		rolesToGiveAccessTo = []
+	}: RateLimitsOptions,
 ) {
-	const ddl = DDL
+	let ddl = DDL
+	for(const role of rolesToGiveAccessTo) {
+		if(!role) {
+			continue
+		}
+
+		ddl += `GRANT SELECT, INSERT, UPDATE, DELETE ON
+			"{{schema_name}}"."{{table_name}}" TO "${role}";\n`
+	}
+
+	ddl = ddl
 		.replaceAll('{{schema_name}}', DEFAULT_SCHEMA_NAME)
 		.replaceAll('{{table_name}}', rateLimitsTableName)
 		.replaceAll('{{table_type}}', rateLimitsTableType)
+
 	await pool.query(`BEGIN;\n${ddl}\nCOMMIT;`)
 }
 

@@ -53,6 +53,12 @@ export type RateLimitsOptions = {
 	 */
 	rateLimitsTableName?: string
 	rateLimitsTableType?: 'unlogged' | 'logged'
+	/**
+	 * Add roles that should be given access to the rate limits table.
+	 * The rate limits table is read/written by the same client that is
+	 * making the request, so it needs to be accessible by the client.
+	 */
+	rolesToGiveAccessTo?: string[]
 
 	rateLimiterPgOpts?: (limit: RateLimit) => Partial<IRateLimiterPostgresOptions>
 	/**
