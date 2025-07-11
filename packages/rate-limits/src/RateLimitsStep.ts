@@ -30,7 +30,6 @@ export class RateLimitsStep extends Step<null> {
 		}
 
 		this.rateLimits[apiName] = applicableRateLimits
-		console.log(`set ${applicableRateLimits.length} rate limits for "${apiName}"`)
 	}
 
 	execute({ indexMap, values }: ExecutionDetails): ExecutionResults<null> {

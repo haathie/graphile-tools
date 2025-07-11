@@ -1,3 +1,4 @@
+import * as debug from 'debug'
 import { Pool } from 'pg'
 import type {} from 'postgraphile'
 import type { PgCodec, PgCodecAttribute } from 'postgraphile/@dataplan/pg'
@@ -19,6 +20,8 @@ type _RateLimiterInput = {
 
 export const DEFAULT_TABLE_NAME = 'rate_limits'
 export const DEFAULT_SCHEMA_NAME = 'postgraphile_meta'
+
+export const DEBUG_LOG = debug.default('@haathie/postgraphile-rate-limits:log')
 
 const DDL = `
 CREATE SCHEMA IF NOT EXISTS {{schema_name}};
@@ -109,9 +112,11 @@ export async function applyRateLimits(
 				customRateLimitsCache?.set(key, customLimit)
 			}
 
-			console.debug(
-				{ key, limit, name: rateLimitName, apiName, isCustom: !!customLimit },
-				'applying rate limit'
+			// TODO: this should probably be a request log
+			DEBUG_LOG(
+				`applying rate limit to key "${key}", limit: ${limit}`
+				+ `, rateLimit: ${rateLimitName}, apiName: ${apiName}`
+				+ `, customLimit: ${!!customLimit}`,
 			)
 		}
 	}

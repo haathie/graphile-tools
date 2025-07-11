@@ -7,7 +7,7 @@ import { get, Step } from 'postgraphile/grafast'
 import { RateLimiterPostgres } from 'rate-limiter-flexible'
 import { RateLimitsStep } from './RateLimitsStep.ts'
 import type { RateLimit, RateLimitsCache, RateLimitsConfig } from './types.ts'
-import { DEFAULT_SCHEMA_NAME, DEFAULT_TABLE_NAME, executeRateLimitsDdl, getRateLimitsDescription, getRateLimitsToApply, parseRateLimitTag, scrapeCodecFromContext } from './utils.ts'
+import { DEBUG_LOG, DEFAULT_SCHEMA_NAME, DEFAULT_TABLE_NAME, executeRateLimitsDdl, getRateLimitsDescription, getRateLimitsToApply, parseRateLimitTag, scrapeCodecFromContext } from './utils.ts'
 
 const RATE_LIMITS_TAG = 'rateLimits'
 
@@ -85,22 +85,22 @@ export const RateLimitsPlugin: GraphileConfig.Plugin = {
 						} = {}
 					}
 				} = build
-				const applicableRateLimits = getRateLimitsToApply(
+				const rateLimits = getRateLimitsToApply(
 					rlsTags, rateLimitsConfig, ctx
 				)
 
-				if(!applicableRateLimits?.length) {
+				if(!rateLimits?.length) {
 					return type
 				}
 
 				const apiName = `${Self.name}.${fieldName}`
-				console.log(
-					`got ${applicableRateLimits.length} applicable rate limits for`
-						+ ` "${apiName}" field`,
+				DEBUG_LOG(
+					`set rate limits for "${apiName}": `
+					+ rateLimits.map(({ rateLimitName }) => rateLimitName).join(', ')
 				)
 
 				// ensure the rateLimit type is defined
-				for(const { rateLimitName } of applicableRateLimits) {
+				for(const { rateLimitName } of rateLimits) {
 					if(!rateLimitsConfig[rateLimitName]) {
 						throw new Error(
 							`Rate limit "${rateLimitName}" is not defined in the options.`
@@ -109,9 +109,7 @@ export const RateLimitsPlugin: GraphileConfig.Plugin = {
 				}
 
 				if(addRateLimitsToDescription !== false) {
-					const rlsDesc = getRateLimitsDescription(
-						applicableRateLimits, rateLimitsConfig
-					)
+					const rlsDesc = getRateLimitsDescription(rateLimits, rateLimitsConfig)
 					type.description = type.description
 						? `${type.description}\n${rlsDesc}`
 						: rlsDesc
@@ -136,7 +134,7 @@ export const RateLimitsPlugin: GraphileConfig.Plugin = {
 						step = new RateLimitsStep()
 					}
 
-					step.setRateLimits(apiName, applicableRateLimits)
+					step.setRateLimits(apiName, rateLimits)
 					return ogPlan?.(plan, args, info) || get(plan, fieldName)
 				}
 

@@ -224,3 +224,10 @@ By default the plugin can rate limit the following operations:
 - `create` mutation -- applied to `create` mutations.
 - `update` mutation -- applied to `update` mutations.
 - `delete` mutation -- applied to `delete` mutations.
+
+## Debugging
+
+To see the rate limits being set, and which ones get used, set the `DEBUG` environment variable:
+``` sh
+DEBUG=@haathie/postgraphile-rate-limits:log
+```
