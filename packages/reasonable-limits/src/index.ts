@@ -1,3 +1,5 @@
+import * as debug from 'debug'
+import { GraphQLError } from 'graphql'
 import type {} from 'postgraphile'
 import type { PgCodec } from 'postgraphile/@dataplan/pg'
 import { sideEffect } from 'postgraphile/grafast'
@@ -6,6 +8,7 @@ const MAX_RECORDS_PER_PAGE = 100
 const DEFAULT_RECORDS_PER_PAGE = 10
 const MAX_RECORDS_TAG = 'maxRecordsPerPage'
 const DEFAULT_RECORDS_TAG = 'defaultRecordsPerPage'
+const debugLog = debug.default('@haathie/postgraphile-reasonable-limits:log')
 
 export const ReasonableLimitsPlugin: GraphileConfig.Plugin = {
 	name: 'ReasonableLimitsPlugin',
@@ -37,8 +40,8 @@ export const ReasonableLimitsPlugin: GraphileConfig.Plugin = {
 				const relation = isPgManyRelationConnectionField
 					? pgFieldResource.name
 					: 'query'
-				console.debug(
-					`ReasonableLimits: Applying limits to "${argName}" argument`
+				debugLog(
+					`Applying limits to "${argName}" argument`
 					+ ` of ${relation}."${fieldName}". Max: ${maxValue}`
 					+ (
 						typeof defaultValue === 'number'
@@ -58,13 +61,14 @@ export const ReasonableLimitsPlugin: GraphileConfig.Plugin = {
 				input.applyPlan = (plan, fieldPlan, input, info) => {
 					sideEffect(input.getRaw(), f => {
 						if(typeof f === 'number' && f > maxValue) {
-							throw new Error(
-								`Maximum of ${maxValue} records can be requested per page`
+							throw new GraphQLError(
+								`Maximum of ${maxValue} records can be requested per page`,
+								{ extensions: { statusCode: 400 } }
 							)
 						}
 					})
 
-					return ogPlan?.(plan, fieldPlan, input, info)
+					ogPlan?.(plan, fieldPlan, input, info)
 				}
 
 				return input

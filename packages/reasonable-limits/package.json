@@ -1,5 +1,5 @@
 {
-	"name": "@haathie/graphile-reasonable-limits",
+	"name": "@haathie/postgraphile-reasonable-limits",
 	"version": "0.1.0",
 	"type": "module",
 	"files": ["lib"],
