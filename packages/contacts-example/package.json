@@ -7,7 +7,7 @@
 		"@haathie/fancy-conditions": "*",
 		"@haathie/fancy-mutations": "*",
 		"@haathie/fancy-subscriptions": "*",
-		"@haathie/graphile-reasonable-limits": "*",
+		"@haathie/postgraphile-reasonable-limits": "*",
 		"@haathie/postgraphile-rate-limits": "*",
 		"fastify": "^5.4.0",
 		"http-terminator": "^3.2.0"
