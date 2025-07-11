@@ -1,8 +1,8 @@
+import type { TestGraphileConfig } from '@haathie/postgraphile-common-utils/tests'
 import { makePgService } from 'postgraphile/adaptors/pg'
 import { PostGraphileAmberPreset } from 'postgraphile/presets/amber'
 import { RateLimitsPlugin } from '../src/index.ts'
 import type { RateLimit } from '../src/types.ts'
-import { type TestGraphileConfig } from './utils.ts'
 
 declare global {
 	namespace Grafast {

@@ -1,8 +1,8 @@
+import { type BootedGraphileServer, bootPreset, getSuperuserPool, type GraphQLRequest, runDdlAndBoot } from '@haathie/postgraphile-common-utils/tests'
 import assert from 'node:assert'
 import { after, before, beforeEach, describe, it } from 'node:test'
 import { GraphQLError } from 'postgraphile/graphql'
 import { CONFIG, OVERRIDE_BOOKS_LIMIT } from './config.ts'
-import { type BootedGraphileServer, bootPreset, getSuperuserPool, type GraphQLRequest, runDdlAndBoot } from './utils.ts'
 
 describe('Rate Limits', () => {
 
