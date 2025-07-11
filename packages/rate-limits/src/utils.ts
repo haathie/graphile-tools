@@ -1,5 +1,6 @@
 import { Pool } from 'pg'
 import type {} from 'postgraphile'
+import type { PgCodec, PgCodecAttribute } from 'postgraphile/@dataplan/pg'
 import type {} from 'postgraphile/adaptors/pg'
 import { GraphQLError } from 'postgraphile/graphql'
 import { RateLimiterPostgres, RateLimiterRes } from 'rate-limiter-flexible'
@@ -244,6 +245,60 @@ function parseDuration(durationStr: string): RateLimit | undefined {
 	}
 }
 
+export function scrapeCodecFromContext(
+	ctx: RateLimitableContext,
+	build: GraphileBuild.Build
+): PgCodec | PgCodecAttribute | undefined {
+	const {
+		scope: {
+			fieldName,
+			isRootMutation,
+			pgFieldResource: { codec: recordCodec } = {},
+			pgFieldAttribute
+		},
+	} = ctx
+	if(recordCodec) {
+		return recordCodec
+	}
+
+	if(pgFieldAttribute) {
+		return pgFieldAttribute.codec
+	}
+
+	// root mutations don't pass the codec at the moment, so
+	// hack to get the codec from the field name
+	if(isRootMutation) {
+		const { inflection, allPgCodecs, pgTableResource } = build
+		for(const codec of allPgCodecs) {
+			// @ts-expect-error
+			const rsc = pgTableResource(codec)
+			if(!rsc) {
+				continue
+			}
+
+			if(fieldName === inflection.createField(rsc)) {
+				return codec
+			}
+
+			for(const uq of rsc.uniques) {
+				if(
+					fieldName === inflection.updateByKeysField({ resource: rsc, unique: uq })
+					|| fieldName === inflection.updateNodeField({ resource: rsc, unique: uq })
+				) {
+					return codec
+				}
+
+				if(
+					fieldName === inflection.deleteByKeysField({ resource: rsc, unique: uq })
+					|| fieldName === inflection.deleteNodeField({ resource: rsc, unique: uq })
+				) {
+					return codec
+				}
+			}
+		}
+	}
+}
+
 export function getRateLimitsToApply(
 	parsedTags: RateLimitParsedTag[] | undefined,
 	availableConfigs: RateLimitsConfigMap,
@@ -294,7 +349,9 @@ function *getRateLimitTypes(
 			isConnectionType,
 			isPgFieldConnection,
 			pgCodec,
-			pgFieldAttribute
+			pgFieldAttribute,
+			isRootMutation,
+			fieldBehaviorScope
 		} = scope
 		if(isConnectionType || isPgFieldConnection) {
 			yield 'connection'
@@ -302,6 +359,24 @@ function *getRateLimitTypes(
 
 		if(pgCodec && pgFieldAttribute) {
 			yield 'field'
+		}
+
+		if(isRootMutation && fieldBehaviorScope?.includes('update')) {
+			yield 'update'
+		}
+
+		if(
+			isRootMutation
+			&& (
+				fieldBehaviorScope?.includes('create')
+				|| fieldBehaviorScope?.includes('insert')
+			)
+		) {
+			yield 'create'
+		}
+
+		if(isRootMutation && fieldBehaviorScope?.includes('delete')) {
+			yield 'delete'
 		}
 
 		break

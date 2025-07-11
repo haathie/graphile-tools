@@ -7,7 +7,7 @@ import { get, Step } from 'postgraphile/grafast'
 import { RateLimiterPostgres } from 'rate-limiter-flexible'
 import { RateLimitsStep } from './RateLimitsStep.ts'
 import type { RateLimit, RateLimitsCache, RateLimitsConfig } from './types.ts'
-import { DEFAULT_SCHEMA_NAME, DEFAULT_TABLE_NAME, executeRateLimitsDdl, getRateLimitsDescription, getRateLimitsToApply, parseRateLimitTag } from './utils.ts'
+import { DEFAULT_SCHEMA_NAME, DEFAULT_TABLE_NAME, executeRateLimitsDdl, getRateLimitsDescription, getRateLimitsToApply, parseRateLimitTag, scrapeCodecFromContext } from './utils.ts'
 
 const RATE_LIMITS_TAG = 'rateLimits'
 
@@ -63,20 +63,20 @@ export const RateLimitsPlugin: GraphileConfig.Plugin = {
 	schema: {
 		hooks: {
 			'GraphQLObjectType_fields_field'(type, build, ctx) {
-				const {
-					scope: {
-						fieldName,
-						pgFieldResource: { codec: recordCodec } = {},
-						pgFieldAttribute
-					},
-					Self
-				} = ctx
-				if(!recordCodec && !pgFieldAttribute) {
+				const codec = scrapeCodecFromContext(ctx, build)
+				if(!codec) {
+					// no codec found, skip
 					return type
 				}
 
-				const rlsTags = recordCodec?.extensions?.haathieRateLimits
-					|| pgFieldAttribute?.extensions?.haathieRateLimits
+				const {
+					scope: {
+						fieldName,
+					},
+					Self
+				} = ctx
+
+				const rlsTags = codec.extensions?.haathieRateLimits
 				const {
 					options: {
 						haathieRateLimits: {

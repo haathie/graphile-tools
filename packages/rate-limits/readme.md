@@ -41,7 +41,7 @@ const preset: GraphileConfig.Preset = {
 			addRateLimitsToDescription: true,
 			// 10 requests per minute for all unauthenticated queries, mutations, and subscriptions
 			defaultUnauthenticatedLimit: { max: 10, durationS: 60 },
-			rateLimits: {
+			rateLimitsConfig: {
 				authenticated: {
 					// set the default rate limits for authenticated users
 					// this is applied automatically to all root level fields
@@ -105,7 +105,16 @@ If you end up exceeding the rate limit, you'll get an error like this:
 
 ## Customising Rate Limits
 
-Customise the rate limits for specific fields, connections, or mutations by adding the `@rateLimits` smart tag.
+Customise the rate limits for specific fields, connections, or mutations by adding the `@rateLimits` smart tag. The format of the tag is:
+`<operation>:<rateLimitName>:<max>/<duration>`
+
+Where:
+- `<operation>` can be a supported operation, see [Supported Operations](#supported-operations) below.
+- `<rateLimitName>` is the name of the rate limit, e.g. `authenticated`, these are the keys of the `rateLimitsConfig` object.
+- `<max>` is the maximum number of requests allowed in the given duration.
+- `<duration>` is the duration in seconds, e.g. `60s` for 60 seconds.
+
+Let's look at an example:
 ``` sql
 CREATE TABLE app.books (
 	id SERIAL PRIMARY KEY,
@@ -206,3 +215,12 @@ const preset: GraphileConfig.Preset = {
 	}
 }
 ```
+
+### Supported Operations
+
+By default the plugin can rate limit the following operations:
+- `connection` queries -- applied to GraphQL connections
+- `field` queries -- applied to any field in a table. This can only be set on columns, and will affect any request that attempts to retrieve it. Eg. `@rateLimits field:authenticated:5/60s`
+- `create` mutation -- applied to `create` mutations.
+- `update` mutation -- applied to `update` mutations.
+- `delete` mutation -- applied to `delete` mutations.

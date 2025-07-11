@@ -7,10 +7,11 @@
     "packages/*"
   ],
   "scripts": {
-    "build": "tsc",
+    "build": "tsc -p tsconfig.build.json",
     "lint": "eslint ./src --ext .js,.ts,.jsx,.tsx",
     "lint:fix": "eslint ./src --fix --ext .js,.ts,.jsx,.tsx",
     "run-file": "sh scripts/run-with-env.sh",
+    "test": "NODE_ENV=test sh scripts/run-with-env.sh --test",
     "start:contacts-example": "npm run run-file -- packages/contacts-example/src/start-server.ts"
   },
   "keywords": [],
@@ -18,7 +19,7 @@
   "license": "ISC",
   "dependencies": {
     "pg": "^8.6.0",
-    "postgraphile": "^5.0.0-beta.41"
+    "postgraphile": "^5.0.0-beta.43"
   },
   "devDependencies": {
     "@adiwajshing/eslint-config": "git+https://github.com/adiwajshing/eslint-config",

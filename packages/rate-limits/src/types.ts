@@ -6,7 +6,11 @@ export interface RateLimit {
 	durationS: number // in seconds
 }
 
-export type RateLimitType = 'connection' | 'create' | 'field'
+export type RateLimitType = 'connection'
+	| 'field'
+	| 'create'
+	| 'update'
+	| 'delete'
 
 export interface RateLimitsConfig {
 	/**
