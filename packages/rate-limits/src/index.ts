@@ -1,4 +1,4 @@
-import { getRequestIp } from '@haathie/graphile-common-utils'
+import { getRequestIp } from '@haathie/postgraphile-common-utils'
 import { LRUCache } from 'lru-cache'
 import { Pool } from 'pg'
 import type {} from 'postgraphile'

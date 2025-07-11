@@ -1,4 +1,4 @@
-import { getInputConditionForResource, isSubscriptionPlan } from '@haathie/graphile-common-utils'
+import { getInputConditionForResource, isSubscriptionPlan } from '@haathie/postgraphile-common-utils'
 import { type PgCodecAttribute, type PgCodecWithAttributes, PgCondition } from 'postgraphile/@dataplan/pg'
 import { type InputObjectFieldApplyResolver } from 'postgraphile/grafast'
 import { type GraphQLInputFieldConfig, GraphQLInputObjectType, type GraphQLInputType } from 'postgraphile/graphql'

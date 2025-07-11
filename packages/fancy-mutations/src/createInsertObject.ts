@@ -1,4 +1,4 @@
-import { getRelationFieldName } from '@haathie/graphile-common-utils'
+import { getRelationFieldName } from '@haathie/postgraphile-common-utils'
 import { type GraphQLFieldConfig, type GraphQLInputFieldConfig, GraphQLInputObjectType, type GraphQLInputObjectTypeConfig, GraphQLInt, GraphQLList, GraphQLNonNull, GraphQLObjectType } from 'graphql'
 import type { QueryResult } from 'pg'
 import { type PgClient, type PgCodecWithAttributes, PgResource, TYPES, withPgClientTransaction } from 'postgraphile/@dataplan/pg'

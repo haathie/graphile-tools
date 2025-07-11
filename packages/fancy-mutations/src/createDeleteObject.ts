@@ -1,4 +1,4 @@
-import { getInputConditionForResource } from '@haathie/graphile-common-utils'
+import { getInputConditionForResource } from '@haathie/postgraphile-common-utils'
 import { type PgCodecWithAttributes, PgResource, PgSelectStep } from 'postgraphile/@dataplan/pg'
 import { type FieldPlanResolver, lambda, Step } from 'postgraphile/grafast'
 import { type GraphQLFieldConfig, GraphQLInt, GraphQLList, GraphQLNonNull, GraphQLObjectType } from 'postgraphile/graphql'

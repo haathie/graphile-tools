@@ -1,4 +1,4 @@
-import { getRelationFieldName } from '@haathie/graphile-common-utils'
+import { getRelationFieldName } from '@haathie/postgraphile-common-utils'
 import { type PgCodecWithAttributes, PgResource } from 'postgraphile/@dataplan/pg'
 import type { PGEntityCtx } from './pg-utils.ts'
 

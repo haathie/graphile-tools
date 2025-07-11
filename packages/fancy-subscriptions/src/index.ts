@@ -1,4 +1,4 @@
-import { getInputConditionForResource, getRelationFieldName } from '@haathie/graphile-common-utils'
+import { getInputConditionForResource, getRelationFieldName } from '@haathie/postgraphile-common-utils'
 import { hostname } from 'os'
 import { Pool } from 'pg'
 import type {} from 'postgraphile'
