@@ -262,7 +262,7 @@ export function scrapeCodecFromContext(
 	}
 
 	if(pgFieldAttribute) {
-		return pgFieldAttribute.codec
+		return pgFieldAttribute
 	}
 
 	// root mutations don't pass the codec at the moment, so

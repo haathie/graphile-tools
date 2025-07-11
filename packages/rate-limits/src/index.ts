@@ -95,8 +95,8 @@ export const RateLimitsPlugin: GraphileConfig.Plugin = {
 
 				const apiName = `${Self.name}.${fieldName}`
 				console.log(
-					`got ${applicableRateLimits.length} applicable rate`
-						+ ` limits for "${apiName}" field`,
+					`got ${applicableRateLimits.length} applicable rate limits for`
+						+ ` "${apiName}" field`,
 				)
 
 				// ensure the rateLimit type is defined
