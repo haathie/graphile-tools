@@ -10,8 +10,12 @@
 		"./package.json": "./package.json"
 	},
 	"publishConfig": {
-    "registry": "https://npm.pkg.github.com",
+		"registry": "https://npm.pkg.github.com",
 		"access": "public"
+	},
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/haathie/graphile-tools.git"
   },
 	"scripts": {
 		"build": "tsc -p tsconfig.json",
