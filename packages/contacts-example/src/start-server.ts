@@ -1,23 +1,23 @@
-import express from 'express'
+import fastify from 'fastify'
 import { createHttpTerminator } from 'http-terminator'
 import { postgraphile } from 'postgraphile'
-import { grafserv } from 'postgraphile/grafserv/express/v4'
+import { grafserv } from 'postgraphile/grafserv/fastify/v4'
 import preset from './graphile.config.ts'
 
-const app = express()
+const app = fastify()
 
 const pgl = postgraphile(preset)
 const pglServ = pgl.createServ(grafserv)
-const srv = app.listen(5678, () => {
-	console.log('Server is running on http://localhost:5678')
-})
 
 const terminator = createHttpTerminator({
-	server: srv,
+	server: app.server,
 	gracefulTerminationTimeout: 1_500
 })
 
-pglServ.addTo(app, srv)
+pglServ.addTo(app)
+
+await app.listen({ port: 5678 })
+console.log('Server listening on http://localhost:5678')
 
 process.once('SIGINT', async() => {
 	await pglServ.release()

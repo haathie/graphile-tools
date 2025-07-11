@@ -3,13 +3,13 @@
 	"type": "module",
 	"scripts": {},
 	"dependencies": {
-		"@haathie/graphile-reasonable-limits": "*",
-		"@haathie/fancy-subscriptions": "*",
-		"@haathie/fancy-mutations": "*",
-		"@haathie/fancy-conditions": "*",
-		"@haathie/postgraphile-rate-limits": "*",
 		"@graphile/simplify-inflection": "^8.0.0-beta.7",
-		"express": "^5.1.0",
+		"@haathie/fancy-conditions": "*",
+		"@haathie/fancy-mutations": "*",
+		"@haathie/fancy-subscriptions": "*",
+		"@haathie/graphile-reasonable-limits": "*",
+		"@haathie/postgraphile-rate-limits": "*",
+		"fastify": "^5.4.0",
 		"http-terminator": "^3.2.0"
 	}
 }
