@@ -207,10 +207,7 @@ export const RateLimitsPlugin: GraphileConfig.Plugin = {
 				{ args: { contextValue, requestContext, resolvedPreset: { schema } = {} } }
 			) {
 				if(!contextValue.ipAddress && requestContext) {
-					contextValue.ipAddress = getRequestIp(
-						// @ts-expect-error -- types may differ
-						requestContext
-					)
+					contextValue.ipAddress = getRequestIp(requestContext)
 				}
 
 				if(!schema?.haathieRateLimits) {
