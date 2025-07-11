@@ -32,3 +32,10 @@ COMMENT ON TABLE your_schema.your_table IS $$
 @defaultRecordsPerPage 50
 $$;
 ```
+
+## Debugging
+
+To debug whether the limit is correctly applied to a "connection" of yours, you can use the `DEBUG` env var:
+```
+DEBUG=@haathie/postgraphile-reasonable-limits:log
+```
