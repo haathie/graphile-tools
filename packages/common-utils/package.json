@@ -3,7 +3,10 @@
 	"version": "0.1.0",
 	"type": "module",
 	"files": ["lib"],
-	"main": "lib/index.js",
+	"exports": {
+		".": { "import": "./lib/index.js" },
+		"./tests": { "import": "./tests/index.ts" } 
+	},
 	"publishConfig": {
     "registry": "https://npm.pkg.github.com",
 		"access": "public"
