@@ -3,11 +3,14 @@
   "version": "1.0.0",
   "description": "",
   "type": "module",
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  },
   "workspaces": [
     "packages/*"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
+    "prepack": "npm run build",
     "lint": "eslint ./src --ext .js,.ts,.jsx,.tsx",
     "lint:fix": "eslint ./src --fix --ext .js,.ts,.jsx,.tsx",
     "run-file": "sh scripts/run-with-env.sh",
