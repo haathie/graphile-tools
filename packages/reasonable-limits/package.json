@@ -15,5 +15,8 @@
 	},
 	"peerDependencies": {
 		"postgraphile": "*"
+	},
+	"devDependencies": {
+		"@haathie/postgraphile-common-utils": "*"
 	}
 }

@@ -4,8 +4,8 @@ import type {} from 'postgraphile'
 import type { PgCodec } from 'postgraphile/@dataplan/pg'
 import { sideEffect } from 'postgraphile/grafast'
 
-const MAX_RECORDS_PER_PAGE = 100
-const DEFAULT_RECORDS_PER_PAGE = 10
+export const MAX_RECORDS_PER_PAGE = 100
+export const DEFAULT_RECORDS_PER_PAGE = 10
 const MAX_RECORDS_TAG = 'maxRecordsPerPage'
 const DEFAULT_RECORDS_TAG = 'defaultRecordsPerPage'
 const debugLog = debug.default('@haathie/postgraphile-reasonable-limits:log')
