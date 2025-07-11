@@ -12,7 +12,7 @@ declare global {
 	}
 }
 
-export const OVERRIDE_BOOKS_LIMIT: RateLimit = { max: 5, durationS: 60 }
+export const OVERRIDE_BOOKS_LIMIT: RateLimit = { max: 8, durationS: 60 }
 
 export const CONFIG: TestGraphileConfig = {
 	ddl: `

@@ -2,7 +2,7 @@ import assert from 'node:assert'
 import { after, before, beforeEach, describe, it } from 'node:test'
 import { GraphQLError } from 'postgraphile/graphql'
 import { CONFIG, OVERRIDE_BOOKS_LIMIT } from './config.ts'
-import { type BootedGraphileServer, type GraphQLRequest, runDdlAndBoot } from './utils.ts'
+import { type BootedGraphileServer, bootPreset, getSuperuserPool, type GraphQLRequest, runDdlAndBoot } from './utils.ts'
 
 describe('Rate Limits', () => {
 
@@ -101,6 +101,39 @@ describe('Rate Limits', () => {
 				assert.match(err.message, /\"authenticated\"/)
 			}
 		)
+	})
+
+	describe('Nested Field Rate Limits', () => {
+		before(async() => {
+			const pool = getSuperuserPool(CONFIG.preset)
+			await pool.query(
+				"COMMENT ON COLUMN rate_limits_test.books.metadata IS '@rateLimits field:authenticated:5/60s'"
+			)
+
+			await srv.close()
+
+			srv = await bootPreset(CONFIG.preset, srv.port)
+		})
+
+		after(async() => {
+			await srv.close()
+			// running DDL again will remove the metadata rate limit
+			srv = await runDdlAndBoot(CONFIG)
+		})
+
+		it('should apply rate limits on nested fields', async() => {
+			await repeatTillRateLimitHit(
+				{
+					query: 'query GetBooks { allBooks { nodes { id title metadata } } }',
+					headers: { 'x-forwarded-for': ip, 'x-user-id': userId }
+				},
+				5,
+				err => {
+					assert.match(err.message, /\"authenticated\"/)
+					assert.match(err.message, /Book\.metadata/)
+				}
+			)
+		})
 	})
 
 	async function repeatTillRateLimitHit(

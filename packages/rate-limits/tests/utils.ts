@@ -1,5 +1,5 @@
 import { createServer } from 'http'
-import { postgraphile } from 'postgraphile'
+import { postgraphile, type PostGraphileInstance } from 'postgraphile'
 import { grafserv } from 'postgraphile/grafserv/node'
 import { type ExecutionResult, GraphQLError, GraphQLSchema } from 'postgraphile/graphql'
 
@@ -9,6 +9,8 @@ export type TestGraphileConfig = {
 }
 
 export type BootedGraphileServer = {
+	port: number
+	pgl: PostGraphileInstance
 	schema: GraphQLSchema
 	graphqlRequest: <T>(request: GraphQLRequest) => Promise<T>
 	close: () => Promise<void>
@@ -21,17 +23,23 @@ export type GraphQLRequest = {
 }
 
 export async function runDdlAndBoot({ ddl, preset }: TestGraphileConfig) {
-	const pool = preset.pgServices?.[0]?.adaptorSettings?.superuserPool
-	if(!pool) {
-		throw new Error('No superuser pool found in preset')
-	}
+	const pool = getSuperuserPool(preset)
 
 	await pool.query(`BEGIN;\n${ddl}\nCOMMIT;`)
 
 	return bootPreset(preset, 1234)
 }
 
-async function bootPreset(
+export function getSuperuserPool(preset: GraphileConfig.Preset) {
+	const pool = preset.pgServices?.[0]?.adaptorSettings?.superuserPool
+	if(!pool) {
+		throw new Error('No superuser pool found in preset')
+	}
+
+	return pool
+}
+
+export async function bootPreset(
 	preset: GraphileConfig.Preset,
 	port: number
 ): Promise<BootedGraphileServer> {
@@ -50,6 +58,8 @@ async function bootPreset(
 	console.log(`Server listening on http://localhost:${port}`)
 
 	return {
+		pgl,
+		port,
 		schema: await pglServ.getSchema(),
 		graphqlRequest(req) {
 			return graphqlRequest(`http://localhost:${port}/graphql`, req)
