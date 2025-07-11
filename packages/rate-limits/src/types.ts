@@ -1,5 +1,5 @@
 import { LRUCache } from 'lru-cache'
-import { IRateLimiterPostgresOptions, RateLimiterPostgres } from 'rate-limiter-flexible'
+import { type IRateLimiterPostgresOptions, RateLimiterPostgres } from 'rate-limiter-flexible'
 
 export interface RateLimit {
 	max: number

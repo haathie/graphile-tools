@@ -9,6 +9,7 @@ This is built on top of [rate-limiter-flexible](https://github.com/animir/node-r
 ``` sh
 npm i @haathie/postgraphile-rate-limits
 ```
+
 2. Add the plugin to your PostGraphile setup. You can define various rate imit types and their limits in the configuration.
 ``` ts
 import { RateLimitsPlugin } from '@haathie/postgraphile-rate-limits';
@@ -99,6 +100,8 @@ If you end up exceeding the rate limit, you'll get an error like this:
   ]
 }
 ```
+
+> Note: This plugin will modify your database by creating a table (and the `postgraphile_meta` schema, if required) to store the rate limits. The table will be named `rate_limits` by default, but you can change this by setting the `rateLimitsTableName` property in the configuration.
 
 ## Customising Rate Limits
 

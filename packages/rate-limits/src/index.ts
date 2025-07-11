@@ -3,12 +3,20 @@ import { LRUCache } from 'lru-cache'
 import { Pool } from 'pg'
 import type {} from 'postgraphile'
 import type {} from 'postgraphile/adaptors/pg'
-import { context, sideEffect } from 'postgraphile/grafast'
+import { get, Step } from 'postgraphile/grafast'
 import { RateLimiterPostgres } from 'rate-limiter-flexible'
-import type { RateLimitsCache, RateLimitsConfig } from './types.ts'
-import { applyRateLimits, DEFAULT_SCHEMA_NAME, DEFAULT_TABLE_NAME, executeRateLimitsDdl, getRateLimitsDescription, getRateLimitsToApply, parseRateLimitTag } from './utils.ts'
+import { RateLimitsStep } from './RateLimitsStep.ts'
+import type { RateLimit, RateLimitsCache, RateLimitsConfig } from './types.ts'
+import { DEFAULT_SCHEMA_NAME, DEFAULT_TABLE_NAME, executeRateLimitsDdl, getRateLimitsDescription, getRateLimitsToApply, parseRateLimitTag } from './utils.ts'
 
 const RATE_LIMITS_TAG = 'rateLimits'
+
+const UNAUTHENTICATED_KEY = 'unauthenticated'
+
+const DEFAULT_CACHE_OPTS: LRUCache.Options<string, RateLimit, unknown> = {
+	max: 2000,
+	ttl: 10 * 60 * 1000, // 10 minutes
+}
 
 const UNAUTHENTICATED_RATE_LIMIT_CONFIG: RateLimitsConfig = {
 	'default': { max: 60, durationS: 60 },
@@ -54,24 +62,6 @@ export const RateLimitsPlugin: GraphileConfig.Plugin = {
 	},
 	schema: {
 		hooks: {
-			'build'(build) {
-				const { options: { haathieRateLimits } } = build
-				if(!haathieRateLimits) {
-					// no rate limits configured, skip
-					return build
-				}
-
-				haathieRateLimits.rateLimitsConfig = {
-					unauthenticated: {
-						...UNAUTHENTICATED_RATE_LIMIT_CONFIG,
-						default: haathieRateLimits.defaultUnauthenticatedLimit
-							|| UNAUTHENTICATED_RATE_LIMIT_CONFIG.default,
-					},
-					...haathieRateLimits.rateLimitsConfig,
-				}
-
-				return build
-			},
 			'GraphQLObjectType_fields_field'(type, build, ctx) {
 				const {
 					scope: {
@@ -129,15 +119,19 @@ export const RateLimitsPlugin: GraphileConfig.Plugin = {
 
 				const ogPlan = type.plan
 				type.plan = (plan, args, info) => {
-					sideEffect(context(), ctx => (
-						applyRateLimits(
-							ctx,
-							apiName,
-							applicableRateLimits,
-							rateLimitsConfig
-						)
-					))
-					return ogPlan?.(plan, args, info) || plan
+					let step: RateLimitsStep | undefined
+					if(plan instanceof Step) {
+						const existingSteps = plan.operationPlan
+							.getStepsByStepClass(RateLimitsStep)
+						step = existingSteps.at(0)
+					}
+
+					if(!step) {
+						step = new RateLimitsStep()
+					}
+
+					step.setRateLimits(apiName, applicableRateLimits)
+					return ogPlan?.(plan, args, info) || get(plan, fieldName)
 				}
 
 				return type
@@ -185,6 +179,17 @@ export const RateLimitsPlugin: GraphileConfig.Plugin = {
 					clearExpiredByTimeout: true,
 				})
 
+				if(!haathieRateLimits.rateLimitsConfig?.[UNAUTHENTICATED_KEY]) {
+					haathieRateLimits.rateLimitsConfig = {
+						[UNAUTHENTICATED_KEY]: {
+							...UNAUTHENTICATED_RATE_LIMIT_CONFIG,
+							default: haathieRateLimits.defaultUnauthenticatedLimit
+								|| UNAUTHENTICATED_RATE_LIMIT_CONFIG.default,
+						},
+						...haathieRateLimits.rateLimitsConfig,
+					}
+				}
+
 				return next()
 			},
 		}
@@ -208,8 +213,7 @@ export const RateLimitsPlugin: GraphileConfig.Plugin = {
 
 				if(!customRateLimitsCache) {
 					customRateLimitsCache = new LRUCache({
-						max: 2000,
-						ttl: 10 * 60 * 1000, // 10 minutes
+						...DEFAULT_CACHE_OPTS,
 						...schema?.haathieRateLimits?.customRateLimitsCacheOpts,
 					})
 				}

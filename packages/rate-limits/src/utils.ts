@@ -5,7 +5,7 @@ import { GraphQLError } from 'postgraphile/graphql'
 import { RateLimiterPostgres, RateLimiterRes } from 'rate-limiter-flexible'
 // @ts-expect-error
 import BlockedKeys from 'rate-limiter-flexible/lib/component/BlockedKeys/index.js'
-import type { RateLimit, RateLimitParsedTag, RateLimitsConfig, RateLimitsConfigMap, RateLimitsOptions, RateLimitType } from './types.ts'
+import type { RateLimit, RateLimitParsedTag, RateLimitsConfigMap, RateLimitsOptions, RateLimitType } from './types.ts'
 
 type RateLimitableContext = GraphileBuild.ContextObjectFieldsField
 
@@ -61,10 +61,8 @@ export async function executeRateLimitsDdl(
 }
 
 export async function applyRateLimits(
+	rateLimitMap: { [apiName: string]: RateLimitParsedTag[] },
 	ctx: Grafast.Context,
-	apiName: string,
-	rateLimits: RateLimitParsedTag[],
-	configs: { [name: string]: RateLimitsConfig }
 ) {
 	const {
 		pgSettings,
@@ -72,45 +70,49 @@ export async function applyRateLimits(
 		haathieRateLimits: {
 			opts: {
 				rateLimitsTableName = DEFAULT_TABLE_NAME,
-				rateLimiterPgOpts
+				rateLimiterPgOpts,
+				rateLimitsConfig = {}
 			} = {},
 			customRateLimitsCache
 		} = {},
 	} = ctx
 	const finalLimits: _RateLimiterInput[] = []
-	for(const rateLimit of rateLimits) {
-		const { rateLimitName } = rateLimit
-		const { getRateLimitingKey, getRateLimit } = configs[rateLimitName]
-		const key = getRateLimitingKey(ctx)
-		if(!key) {
-			continue // no key to limit
+
+	for(const apiName in rateLimitMap) {
+		for(const rateLimit of rateLimitMap[apiName]) {
+			const { rateLimitName } = rateLimit
+			const { getRateLimitingKey, getRateLimit } = rateLimitsConfig[rateLimitName]
+			const key = getRateLimitingKey(ctx)
+			if(!key) {
+				continue // no key to limit
+			}
+
+			const customLimitCached = customRateLimitsCache?.get(key)
+			const customLimit = customLimitCached || await getRateLimit?.(key, ctx)
+			const limit = customLimit
+				|| rateLimit.limit
+				|| rateLimitsConfig[rateLimitName].default
+			if(!limit) {
+				continue
+			}
+
+			finalLimits.push({
+				limit: limit,
+				name: rateLimitName,
+				key,
+				apiName,
+			})
+
+			if(customLimit && !customLimitCached) {
+				// set the custom limit in the cache
+				customRateLimitsCache?.set(key, customLimit)
+			}
+
+			console.debug(
+				{ key, limit, name: rateLimitName, apiName, isCustom: !!customLimit },
+				'applying rate limit'
+			)
 		}
-
-		const customLimitCached = customRateLimitsCache?.get(key)
-		const customLimit = customLimitCached || await getRateLimit?.(key, ctx)
-		const limit = customLimit
-			|| rateLimit.limit
-			|| configs[rateLimitName].default
-		if(!limit) {
-			continue
-		}
-
-		finalLimits.push({
-			limit: limit,
-			name: rateLimitName,
-			key,
-			apiName,
-		})
-
-		if(customLimit && !customLimitCached) {
-			// set the custom limit in the cache
-			customRateLimitsCache?.set(key, customLimit)
-		}
-
-		console.debug(
-			{ key, limit, name: rateLimitName, apiName, isCustom: !!customLimit },
-			'applying rate limit'
-		)
 	}
 
 	if(!finalLimits.length) {
@@ -139,10 +141,7 @@ export async function applyRateLimits(
 				await limiter.consume(key)
 			} catch(err) {
 				if(err instanceof RateLimiterRes) {
-					const error = mapResToError(err, input)
-					if(error) {
-						throw error
-					}
+					throw mapResToError(err, input)
 				}
 
 				throw err
