@@ -1,5 +1,5 @@
-import { LRUCache } from 'lru-cache'
-import { type IRateLimiterPostgresOptions, RateLimiterPostgres } from 'rate-limiter-flexible'
+import type { LRUCache } from 'lru-cache'
+import type { IRateLimiterPostgresOptions, RateLimiterPostgres } from 'rate-limiter-flexible'
 
 export interface RateLimit {
 	max: number
@@ -104,11 +104,6 @@ declare global {
 	}
 
 	namespace GraphileBuild {
-
-		interface BehaviorStrings {
-			'subscribable': true
-		}
-
 		interface SchemaOptions {
 			haathieRateLimits?: RateLimitsOptions
 		}
