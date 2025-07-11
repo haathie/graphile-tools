@@ -27,7 +27,7 @@ export async function runDdlAndBoot({ ddl, preset }: TestGraphileConfig) {
 
 	await pool.query(`BEGIN;\n${ddl}\nCOMMIT;`)
 
-	return bootPreset(preset, 1234)
+	return bootPreset(preset, makeRandomPort())
 }
 
 export function getSuperuserPool(preset: GraphileConfig.Preset) {
@@ -125,4 +125,8 @@ async function graphqlRequest<T>(
 	}
 
 	return json.data
+}
+
+function makeRandomPort() {
+	return Math.floor(Math.random() * (65535 - 1024)) + 1024
 }
