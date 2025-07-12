@@ -62,6 +62,29 @@ export const RateLimitsPlugin: GraphileConfig.Plugin = {
 	},
 	schema: {
 		hooks: {
+			'build'(build) {
+				const { options } = build
+				if(!options.haathieRateLimits) {
+					options.haathieRateLimits = {
+						isAuthenticated() {
+							return false
+						},
+					}
+				}
+
+				if(!options.haathieRateLimits.rateLimitsConfig?.[UNAUTHENTICATED_KEY]) {
+					options.haathieRateLimits.rateLimitsConfig = {
+						[UNAUTHENTICATED_KEY]: {
+							...UNAUTHENTICATED_RATE_LIMIT_CONFIG,
+							default: options.haathieRateLimits.defaultUnauthenticatedLimit
+								|| UNAUTHENTICATED_RATE_LIMIT_CONFIG.default,
+						},
+						...options.haathieRateLimits.rateLimitsConfig,
+					}
+				}
+
+				return build
+			},
 			'GraphQLObjectType_fields_field'(type, build, ctx) {
 				const codec = scrapeCodecFromContext(ctx, build)
 				if(!codec) {
@@ -182,17 +205,6 @@ export const RateLimitsPlugin: GraphileConfig.Plugin = {
 					tableCreated: true,
 					clearExpiredByTimeout: true,
 				})
-
-				if(!haathieRateLimits.rateLimitsConfig?.[UNAUTHENTICATED_KEY]) {
-					haathieRateLimits.rateLimitsConfig = {
-						[UNAUTHENTICATED_KEY]: {
-							...UNAUTHENTICATED_RATE_LIMIT_CONFIG,
-							default: haathieRateLimits.defaultUnauthenticatedLimit
-								|| UNAUTHENTICATED_RATE_LIMIT_CONFIG.default,
-						},
-						...haathieRateLimits.rateLimitsConfig,
-					}
-				}
 
 				return next()
 			},
