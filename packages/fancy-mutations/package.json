@@ -1,5 +1,5 @@
 {
-	"name": "@haathie/fancy-mutations",
+	"name": "@haathie/postgraphile-fancy-mutations",
 	"version": "0.1.0",
 	"type": "module",
 	"files": ["lib"],
@@ -13,6 +13,6 @@
 		"build": "tsc -p tsconfig.json"
 	},
 	"dependencies": {
-		"@haathie/postgraphile-common-utils": "*"
+		"@haathie/postgraphile-common-utils": "^0.1.0"
 	}
 }

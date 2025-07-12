@@ -1,6 +1,6 @@
 import { PgSimplifyInflectionPreset } from '@graphile/simplify-inflection'
 import { FancyConditionsPlugin } from '@haathie/fancy-conditions'
-import { FancyMutationsPlugin } from '@haathie/fancy-mutations'
+import { FancyMutationsPlugin } from '@haathie/postgraphile-fancy-mutations'
 import { FancySubscriptionsPlugin } from '@haathie/fancy-subscriptions'
 import { ReasonableLimitsPlugin } from '@haathie/postgraphile-reasonable-limits'
 import { RateLimitsPlugin } from '@haathie/postgraphile-rate-limits'

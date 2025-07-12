@@ -276,7 +276,6 @@ CREATE TABLE app.contact_tags (
 );
 
 comment on constraint contact_tags_contact_id_fkey on app.contact_tags is $$
-@foreignConnectionFieldName tags
 @behaviour +single
 $$;
 comment on constraint contact_tags_tag_id_fkey on app.contact_tags is $$
