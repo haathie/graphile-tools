@@ -1,5 +1,4 @@
 import type {} from 'postgraphile'
-import { graphQLSchemaHook } from './graphQLSchema.ts'
 import { inflection } from './inflection.ts'
 import { fieldsHook } from './schema-fields.ts'
 import { initHook } from './schema-init.ts'

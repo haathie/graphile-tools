@@ -206,10 +206,7 @@ function buildItemRelationGraph(
 	return normalised
 }
 
-function getEntityCtx<T>(
-	table: _PgResource,
-	inflection: GraphileBuild.Build['inflection'],
-): PGEntityCtx<T> {
+export function getEntityCtx<T>(table: _PgResource): PGEntityCtx<T> {
 	const { identifier, executor, codec } = table
 	// table ID is the executor name + '.' + table name
 	// so we remove the executor name from the identifier
@@ -225,18 +222,12 @@ function getEntityCtx<T>(
 	}
 
 	const otherUniqueNames = table.uniques.map(u => {
-		return {
-			columns: u.attributes.map(a => (
-				inflection.attribute({ codec, attributeName: a }) as keyof T
-			))
-		}
+		return { columns: [...u.attributes] as Array<keyof T> }
 	})
 	for(const attributeName in codec.attributes) {
-		const propname = inflection
-			.attribute({ codec: table.codec, attributeName })
-		propToColumnMap[propname] = attributeName
+		propToColumnMap[attributeName] = attributeName
 		if(primaryKey.attributes.includes(attributeName)) {
-			primaryKeyNames.push(propname)
+			primaryKeyNames.push(attributeName)
 		}
 	}
 

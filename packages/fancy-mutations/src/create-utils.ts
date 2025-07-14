@@ -1,6 +1,7 @@
 import { getRelationFieldName } from '@haathie/postgraphile-common-utils'
 import type { PgCodecWithAttributes, PgResource } from 'postgraphile/@dataplan/pg'
 import type { GraphQLInputFieldConfig, GraphQLInputObjectType, GraphQLInputType } from 'postgraphile/graphql'
+import type { PgRowBuilder } from './PgCreateStep.ts'
 import type { PgTableResource } from './types.ts'
 import { isInsertable, isInsertableAttribute } from './utils.ts'
 
@@ -66,6 +67,9 @@ export function buildFieldsForCreate(
 						type: shouldNotNull
 							? new GraphQLNonNull(coreType)
 							: coreType,
+						apply(plan: PgRowBuilder, input) {
+							plan.set(attrName, input)
+						}
 					}
 				}
 			)
@@ -74,6 +78,7 @@ export function buildFieldsForCreate(
 		for(const [relName, typeName] of Object.entries(upsertRelations)) {
 			const { isUnique } = table.getRelation(relName)
 			const fieldName = getRelationFieldName(relName, table, build)
+
 			fields[fieldName] = fieldWithHooks(
 				{ fieldName, isBulkCreateInputObjectField: true },
 				() => {
@@ -82,6 +87,17 @@ export function buildFieldsForCreate(
 						type: isUnique
 							? type
 							: new GraphQLList(new GraphQLNonNull(type)),
+						extensions: {
+							grafast: {
+								apply(plan: PgRowBuilder) {
+									if(isUnique) {
+										return plan.setRelation(relName)
+									}
+
+									return () => plan.setRelation(relName)
+								}
+							}
+						}
 					}
 				}
 			)

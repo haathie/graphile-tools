@@ -1,9 +1,11 @@
-import type { lambda } from 'postgraphile/grafast'
-import type { GraphQLEnumType, GraphQLObjectType } from 'postgraphile/graphql'
+import { pgSelectFromRecords } from 'postgraphile/@dataplan/pg'
+import { lambda } from 'postgraphile/grafast'
+import type { GraphQLObjectType } from 'postgraphile/graphql'
+import { buildFieldsForCreate } from './create-utils.ts'
+import { PgCreateStep } from './PgCreateStep.ts'
 import { PgSelectAndModify } from './PgSelectAndModify.js'
 import type { GrafastPlanParams, PgTableResource } from './types.ts'
 import { isDeletable, isInsertable, isUpdatable } from './utils.ts'
-import { buildFieldsForCreate } from './create-utils.ts'
 
 type Hook = NonNullable<
 	NonNullable<
@@ -133,12 +135,11 @@ function registerCreatePayload(
 				return {
 					affected: {
 						type: new GraphQLNonNull(GraphQLInt),
-						// TODO
-						// extensions: { grafast: { plan: createRowCountPlan(lambda) } }
+						extensions: { grafast: { plan: createRowCountPlan(lambda) } }
 					},
 					items: getOutputItems(
 						resource, { isBulkCreateItems: true }, build, fieldWithHooks
-					)
+					),
 				}
 			}
 		}),
@@ -171,7 +172,7 @@ function registerCreateInputObject(
 function createRowCountPlan(
 	_lambda: typeof lambda,
 ) {
-	return (...[plan]: GrafastPlanParams<PgSelectAndModify>) => (
+	return (...[plan]: GrafastPlanParams<PgSelectAndModify | PgCreateStep>) => (
 		_lambda(plan, arg => {
 			if(!Array.isArray(arg.items)) {
 				throw new Error('Expected an array of results')
@@ -200,7 +201,25 @@ function getOutputItems(
 
 		return {
 			type: new build.graphql.GraphQLList(outputObj),
-			extensions: { grafast: { plan: p => p } }
+			extensions: {
+				grafast: {
+					plan: ($plan) => {
+						if(!($plan instanceof PgCreateStep)) {
+							throw new Error(
+								`Expected a PgCreateStep, got ${$plan.constructor.name}`
+							)
+						}
+
+						const $select = pgSelectFromRecords(
+							resource,
+							lambda($plan, p => (console.log(p.items), p.items))
+						)
+						$plan.referenceSelectForSelections($select)
+
+						return $select
+					}
+				}
+			}
 		}
 	})
 }

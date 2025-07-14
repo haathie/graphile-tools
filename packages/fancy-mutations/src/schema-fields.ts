@@ -1,8 +1,9 @@
 import { getInputConditionForResource } from '@haathie/postgraphile-common-utils'
-import type { PgSelectStep } from 'postgraphile/@dataplan/pg'
-import type { GraphQLEnumType, GraphQLInputObjectType } from 'postgraphile/graphql'
+import { type PgSelectStep } from 'postgraphile/@dataplan/pg'
+import { GraphQLEnumType, GraphQLInputObjectType } from 'postgraphile/graphql'
+import { PgCreateStep } from './PgCreateStep.ts'
 import { PgSelectAndModify } from './PgSelectAndModify.js'
-import type { PgTableResource } from './types.ts'
+import type { GrafastPlanParams, PgTableResource } from './types.ts'
 import { isDeletable, isInsertable, isUpdatable } from './utils.ts'
 
 type Hook = NonNullable<
@@ -192,9 +193,25 @@ function getBulkCreateFields(
 				args: {
 					onConflict: {
 						type: OnConflictOptions,
-						defaultValue: 'error'
+						defaultValue: 'error',
 					},
-					items: { type: new GraphQLNonNull(new GraphQLList(inputObj)) }
+					items: {
+						type: new GraphQLNonNull(
+							new GraphQLList(new GraphQLNonNull(inputObj))
+						),
+						extensions: {
+							grafast: {
+								applyPlan(_, plan: PgCreateStep, input) {
+									return input.apply(plan, p => (
+										// returning a fn, as "items" is a list
+										// this'll create a new row builder for
+										// each item
+										() => p.addRowBuilder()
+									))
+								}
+							}
+						}
+					}
 				},
 				type: getOutputTypeByName(
 					inflection.bulkCreatePayloadName(resource)
@@ -205,7 +222,7 @@ function getBulkCreateFields(
 		)
 	}
 
-	function plan() {
-		// TODO: Implement the plan for bulk create
+	function plan(...[, args]: GrafastPlanParams) {
+		return new PgCreateStep(resource, args.getRaw('onConflict'))
 	}
 }

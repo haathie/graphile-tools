@@ -7,6 +7,8 @@ export type GrafastPlanParams<T extends Step = Step> = Parameters<
 
 export type PgTableResource = PgResource<string, PgCodecWithAttributes>
 
+export type OnConflictOption = 'error' | 'ignore' | 'replace'
+
 declare global {
 	namespace GraphileBuild {
 		interface Inflection {
