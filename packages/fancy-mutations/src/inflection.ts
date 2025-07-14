@@ -17,5 +17,26 @@ export const inflection: GraphileConfig.PluginInflectionConfig = {
 				`${this.bulkDeleteOperationName(resource)}_payload`
 			)
 		},
+		onConflictEnumName() {
+			return this.upperCamelCase('on_conflict_options')
+		},
+		bulkCreateOperationName(options, resource) {
+			return this.camelCase(this.pluralize(`create_${resource.name}`))
+		},
+		bulkCreatePayloadName(options, resource) {
+			return this.upperCamelCase(
+				`${this.bulkCreateOperationName(resource)}_payload`
+			)
+		},
+		bulkCreateInputObjectName(options, resource) {
+			return this.upperCamelCase(
+				`${resource.name}_create_item`
+			)
+		},
+		bulkCreateInputObjectRelationName(options, path) {
+			return this.upperCamelCase(
+				`${path.join('_')}_create_item`
+			)
+		}
 	}
 }

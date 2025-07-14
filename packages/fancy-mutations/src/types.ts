@@ -15,19 +15,42 @@ declare global {
 
 			bulkDeleteOperationName(resource: PgResource): string
 			bulkDeletePayloadName(resource: PgResource): string
+
+			onConflictEnumName(): string
+
+			bulkCreateOperationName(resource: PgResource): string
+			bulkCreatePayloadName(resource: PgResource): string
+
+			bulkCreateInputObjectName(resource: PgResource): string
+			bulkCreateInputObjectRelationName(
+				path: string[]
+			): string
 		}
 
 		interface ScopeObject {
 			isBulkDeleteObject?: boolean
 			isBulkUpdateObject?: boolean
+			isBulkCreateObject?: boolean
+		}
+
+		interface ScopeInputObject {
+			isBulkCreateInputObject?: boolean
+			isBulkCreateInputObjectRelation?: boolean
+			path?: string[]
+		}
+
+		interface ScopeInputObjectFieldsField {
+			isBulkCreateInputObjectField?: boolean
 		}
 
 		interface ScopeObjectFields {
 			isBulkDeleteItems?: boolean
 			isBulkUpdateItems?: boolean
+			isBulkCreateItems?: boolean
 
 			isBulkDeleteOperation?: boolean
 			isBulkUpdateOperation?: boolean
+			isBulkCreateOperation?: boolean
 		}
 	}
 }

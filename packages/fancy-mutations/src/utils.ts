@@ -1,6 +1,6 @@
 import { getRelationFieldName } from '@haathie/postgraphile-common-utils'
 import * as debug from 'debug'
-import { type PgCodecWithAttributes, PgResource } from 'postgraphile/@dataplan/pg'
+import type { PgCodecAttribute, PgCodecWithAttributes, PgResource } from 'postgraphile/@dataplan/pg'
 import type { PGEntityCtx } from './pg-utils.ts'
 
 type _PgResource = PgResource<string, PgCodecWithAttributes>
@@ -276,6 +276,7 @@ export const isUpdatable = (
 	return !!build.behavior.pgResourceMatches(resource, 'resource:update')
 }
 
+// from: https://github.com/graphile/crystal/blob/da7b7196c627e1151564f185f199a716206da903/graphile-build/graphile-build-pg/src/plugins/PgMutationUpdateDeletePlugin.ts#L154
 export const isDeletable = (
 	build: GraphileBuild.Build,
 	resource: PgResource<any, any, any, any, any>,
@@ -301,4 +302,35 @@ export const isDeletable = (
 	}
 
 	return !!build.behavior.pgResourceMatches(resource, 'resource:delete')
+}
+
+// from: https://github.com/graphile/crystal/blob/da7b7196c627e1151564f185f199a716206da903/graphile-build/graphile-build-pg/src/plugins/PgMutationCreatePlugin.ts#L53C1-L62C3
+export const isInsertable = (
+	build: GraphileBuild.Build,
+	resource: PgResource<any, any, any, any, any>,
+) => {
+	if(resource.parameters) {
+		return false
+	}
+
+	if(!resource.codec.attributes) {
+		return false
+	}
+
+	if(resource.codec.polymorphism) {
+		return false
+	}
+
+	if(resource.codec.isAnonymous) {
+		return false
+	}
+
+	return build.behavior.pgResourceMatches(resource, 'resource:insert') === true
+}
+
+export const isInsertableAttribute = (
+	build: GraphileBuild.Build,
+	resource: PgCodecAttribute<any, any>,
+) => {
+	return resource.extensions?.canInsert || resource.extensions?.isInsertable
 }

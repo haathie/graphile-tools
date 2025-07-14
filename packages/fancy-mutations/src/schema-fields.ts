@@ -1,9 +1,9 @@
 import { getInputConditionForResource } from '@haathie/postgraphile-common-utils'
 import type { PgSelectStep } from 'postgraphile/@dataplan/pg'
-import type { GraphQLInputObjectType } from 'postgraphile/graphql'
+import type { GraphQLEnumType, GraphQLInputObjectType } from 'postgraphile/graphql'
 import { PgSelectAndModify } from './PgSelectAndModify.js'
 import type { PgTableResource } from './types.ts'
-import { isDeletable, isUpdatable } from './utils.ts'
+import { isDeletable, isInsertable, isUpdatable } from './utils.ts'
 
 type Hook = NonNullable<
 	NonNullable<
@@ -27,7 +27,7 @@ export const fieldsHook: Hook = (
 			build.extend(
 				fields,
 				getBulkDeleteFields(build, resource, ctx),
-				`Add bulk delete fields for ${resource.name}`
+				`Add bulk delete operation for ${resource.name}`
 			)
 		}
 
@@ -35,7 +35,15 @@ export const fieldsHook: Hook = (
 			build.extend(
 				fields,
 				getBulkUpdateFields(build, resource, ctx),
-				`Add bulk update fields for ${resource.name}`
+				`Add bulk update operation for ${resource.name}`
+			)
+		}
+
+		if(isInsertable(build, resource)) {
+			build.extend(
+				fields,
+				getBulkCreateFields(build, resource, ctx),
+				`Add bulk create operation for ${resource.name}`
 			)
 		}
 	}
@@ -154,5 +162,50 @@ function getBulkUpdateFields(
 		step.update()
 
 		return step
+	}
+}
+
+function getBulkCreateFields(
+	build: GraphileBuild.Build,
+	resource: PgTableResource,
+	{ fieldWithHooks }: GraphileBuild.ContextObjectFields
+) {
+	const {
+		inflection,
+		getOutputTypeByName,
+		graphql: { GraphQLNonNull, GraphQLList }
+	} = build
+	const fieldName = inflection.bulkCreateOperationName(resource)
+
+	const inputObj = build.getTypeByName(
+		inflection.bulkCreateInputObjectName(resource)
+	)	as GraphQLInputObjectType
+
+	const OnConflictOptions = build.getTypeByName(
+		inflection.onConflictEnumName()
+	) as GraphQLEnumType
+
+	return {
+		[fieldName]: fieldWithHooks(
+			{ fieldName: fieldName, isBulkCreateOperation: true },
+			{
+				args: {
+					onConflict: {
+						type: OnConflictOptions,
+						defaultValue: 'error'
+					},
+					items: { type: new GraphQLNonNull(new GraphQLList(inputObj)) }
+				},
+				type: getOutputTypeByName(
+					inflection.bulkCreatePayloadName(resource)
+				),
+				extensions: { grafast: { plan } },
+				description: `Create one or more ${resource.name} items`
+			}
+		)
+	}
+
+	function plan() {
+		// TODO: Implement the plan for bulk create
 	}
 }
