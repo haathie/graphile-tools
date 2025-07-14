@@ -1,3 +1,4 @@
+export type * from './types.ts'
 import { getRequestIp } from '@haathie/postgraphile-common-utils'
 import { LRUCache } from 'lru-cache'
 import { Pool } from 'pg'
