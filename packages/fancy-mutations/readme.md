@@ -1,8 +1,8 @@
 # Postgraphile Fancy Mutations Plugin
 
 This plugin adds support for more complex, but performant, mutations in PostGraphile, namely:
-- Bulk + nested insert mutations, with ignore duplicates support
-- Bulk + nested upsert mutations
+- Bulk + relational insert mutations, with ignore duplicates support
+- Bulk + relational upsert mutations
 - Bulk update mutations, using the same conditions available in your `connection` queries.
 - Bulk delete mutations, using the same conditions available in your `connection` queries.
 

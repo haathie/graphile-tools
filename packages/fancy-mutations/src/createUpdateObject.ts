@@ -3,6 +3,7 @@ import { type PgCodecWithAttributes, PgResource, PgSelectStep } from 'postgraphi
 import { type FieldPlanResolver, lambda, Step } from 'postgraphile/grafast'
 import { type GraphQLFieldConfig, GraphQLInputObjectType, GraphQLInt, GraphQLList, GraphQLNonNull, GraphQLObjectType } from 'postgraphile/graphql'
 import { PgSelectAndModify } from './PgSelectAndModify.js'
+import { DEBUG } from './utils.ts'
 
 type CreateMutationOpts = {
 	table: PgResource<string, PgCodecWithAttributes>
@@ -31,18 +32,20 @@ export function createUpdateObject(
 	const _outputObj = build
 		.getGraphQLTypeByPgCodec(codec, 'output') as GraphQLObjectType
 	if(!_outputObj) {
+		DEBUG(`No output type for ${table.name} found, skipping update mutation.`)
 		return
 	}
 
-	const baseName = inflection.pluralize(`update_${table.name}`)
 	const patchType = build
 		.getGraphQLTypeByPgCodec(codec, 'patch') as GraphQLInputObjectType
 	if(!patchType) {
+		DEBUG(`No patch type for ${table.name} found, skipping update mutation.`)
 		return
 	}
 
 	const conditionArg = getInputConditionForResource(table, build)
 	if(!conditionArg) {
+		DEBUG(`No condition arg for ${table.name} found, skipping update mutation.`)
 		return
 	}
 
@@ -50,7 +53,7 @@ export function createUpdateObject(
 	return {
 		description: `Update one or more ${table.name} items`,
 		type: new GraphQLObjectType({
-			name: inflection.upperCamelCase(`${baseName}_payload`),
+			name: inflection.bulkUpdatePayloadName(table),
 			fields: {
 				items: {
 					type: new GraphQLNonNull(

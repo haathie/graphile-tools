@@ -1,4 +1,5 @@
 import { getRelationFieldName } from '@haathie/postgraphile-common-utils'
+import * as debug from 'debug'
 import { type PgCodecWithAttributes, PgResource } from 'postgraphile/@dataplan/pg'
 import type { PGEntityCtx } from './pg-utils.ts'
 
@@ -29,6 +30,8 @@ type ExecuteNestedMutationsOpts<T> = {
 		ctx: PGEntityCtx<T>
 	): Promise<unknown[]>
 }
+
+export const DEBUG = debug.default('@haathie/postgraphile-fancy-mutations:log')
 
 export async function executeNestedMutations<T extends { [k: string]: unknown }>({
 	items,
@@ -243,4 +246,59 @@ function getEntityCtx<T>(
 		uniques: otherUniqueNames,
 		propertyColumnMap: propToColumnMap as Record<keyof T, string>,
 	}
+}
+
+// from: https://github.com/graphile/crystal/blob/da7b7196c627e1151564f185f199a716206da903/graphile-build/graphile-build-pg/src/plugins/PgMutationUpdateDeletePlugin.ts#L154
+export const isUpdatable = (
+	build: GraphileBuild.Build,
+	resource: PgResource<any, any, any, any, any>,
+) => {
+	if(resource.parameters) {
+		return false
+	}
+
+	if(!resource.codec.attributes) {
+		return false
+	}
+
+	if(resource.codec.polymorphism) {
+		return false
+	}
+
+	if(resource.codec.isAnonymous) {
+		return false
+	}
+
+	if(!resource.uniques || resource.uniques.length < 1) {
+		return false
+	}
+
+	return !!build.behavior.pgResourceMatches(resource, 'resource:update')
+}
+
+export const isDeletable = (
+	build: GraphileBuild.Build,
+	resource: PgResource<any, any, any, any, any>,
+) => {
+	if(resource.parameters) {
+		return false
+	}
+
+	if(!resource.codec.attributes) {
+		return false
+	}
+
+	if(resource.codec.polymorphism) {
+		return false
+	}
+
+	if(resource.codec.isAnonymous) {
+		return false
+	}
+
+	if(!resource.uniques || resource.uniques.length < 1) {
+		return false
+	}
+
+	return !!build.behavior.pgResourceMatches(resource, 'resource:delete')
 }

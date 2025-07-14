@@ -49,8 +49,7 @@ export const graphQLSchemaHook: Hook = (
 
 		const updateObj = createUpdateObject({ table, build })
 		if(updateObj) {
-			const updateFieldName = inflection
-				.camelCase(inflection.pluralize(`update_${codec.name}`))
+			const updateFieldName = inflection.bulkUpdateOperationName(table)
 			mutations[updateFieldName] = updateObj
 			for(const unique of table.uniques) {
 				const fieldName = inflection

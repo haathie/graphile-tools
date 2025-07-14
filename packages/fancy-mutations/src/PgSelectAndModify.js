@@ -83,7 +83,8 @@ export class PgSelectAndModify extends PgSelectStep {
 				WITH selections AS (${text}),
 				modifications AS (
 					DELETE FROM ${compiledFrom} AS t
-					INNER JOIN selections ON ${whereMatch}
+					USING selections
+					WHERE ${whereMatch}
 				)
 				SELECT * FROM selections
 				`

@@ -1,9 +1,9 @@
 import { PgSimplifyInflectionPreset } from '@graphile/simplify-inflection'
 import { FancyConditionsPlugin } from '@haathie/fancy-conditions'
-import { FancyMutationsPlugin } from '@haathie/postgraphile-fancy-mutations'
 import { FancySubscriptionsPlugin } from '@haathie/fancy-subscriptions'
-import { ReasonableLimitsPlugin } from '@haathie/postgraphile-reasonable-limits'
+import { FancyMutationsPlugin } from '@haathie/postgraphile-fancy-mutations'
 import { RateLimitsPlugin } from '@haathie/postgraphile-rate-limits'
+import { ReasonableLimitsPlugin } from '@haathie/postgraphile-reasonable-limits'
 import { makePgService } from 'postgraphile/adaptors/pg'
 // The standard base preset to use, includes the main PostGraphile features
 import { PostGraphileAmberPreset } from 'postgraphile/presets/amber'
@@ -28,12 +28,12 @@ const preset: GraphileConfig.Preset = {
 			superuserConnectionString: process.env.PG_URI,
 			poolConfig: { min: 15, max: 30 },
 			pgSettings(ctx) {
-				let teamId = ctx.node?.req?.headers['org-id']
+				let teamId = ctx.http?.getHeader('org-id')
 				if(typeof teamId !== 'string') {
 					teamId = 'default-org-id'
 				}
 
-				let userId = ctx.node?.req?.headers['user-id']
+				let userId = ctx.http?.getHeader('user-id')
 				if(typeof userId !== 'string') {
 					userId = 'default-user-id'
 				}
@@ -43,7 +43,7 @@ const preset: GraphileConfig.Preset = {
 					'app.org_id': teamId,
 					'app.user_id': userId,
 					'app.has_full_contacts_access': (
-						ctx.node?.req?.headers['has_full_contacts_access'] !== 'false'
+						ctx.http?.getHeader('has_full_contacts_access') !== 'false'
 					).toString(),
 				}
 			},
@@ -65,6 +65,7 @@ const preset: GraphileConfig.Preset = {
 	},
 	grafast: { explain: true },
 	schema: {
+		dontSwallowErrors: true,
 		defaultBehavior: '-single',
 		haathieRateLimits: {
 			rateLimiterPgOpts: l => ({ inMemoryBlockOnConsumed: l.max }),
