@@ -28,7 +28,8 @@ const preset: GraphileConfig.Preset = {
 
 ## Bulk Upsert/Insert Mutations
 
-The plugin automatically creates a bulk `create` mutation for each table that is capable of being inserted into, and has the `resource:insert` behaviour enabled.
+The plugin automatically creates a bulk `create` mutation for each table that is capable of being inserted into, and has the `insert` behaviour enabled.
+
 It also scans for any relations it has, and adds inputs to the mutation for those relations, so you can insert related records in a single transaction.
 
 ### Example
@@ -125,6 +126,8 @@ mutation UpsertContacts {
 
 The bulk update mutation allows you to update records matched by an arbitrary filter specified by the resource's `connection` `condition` argument. This means you can update multiple records in a single mutation, without having to specify each record individually.
 
+The plugin automatically creates a bulk `update` mutation for each table that is capable of being updated, and has the `update` behaviour enabled.
+
 For example, to update all contacts with a name containing "Jane" and set their phone number to "123456753".
 
 ```graphql
@@ -151,7 +154,7 @@ This `condition` was present in the `getContacts` connection query & was simply 
 
 Similar to the bulk update mutation, the bulk delete mutation allows you to delete records matched by an arbitrary filter specified by the resource's `connection` `condition` argument. This means you can delete multiple records in a single mutation, without having to specify each record individually.
 
-This mutation is automatically created for each table that has the `resource:delete` behaviour enabled, and the introspection role has access to delete records from that table.
+This mutation is automatically created for each table that has the `delete` behaviour enabled, and the introspection role has access to delete records from that table.
 
 For example, to delete all contacts with a name containing "John":
 

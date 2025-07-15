@@ -1,7 +1,7 @@
 import type { NodePostgresPgClient } from 'postgraphile/adaptors/pg'
 import { context, type ExecutionDetails, type ExecutionResults, type Maybe, Modifier, Step } from 'postgraphile/grafast'
 import { GraphQLError } from 'postgraphile/graphql'
-import { insertData } from './pg-utils.ts'
+import { insertData, type PGEntityCtx } from './pg-utils.ts'
 import type { OnConflictOption, PgTableResource } from './types.ts'
 import { getEntityCtx } from './utils.ts'
 
@@ -23,6 +23,7 @@ export class PgCreateStep extends Step<{ items: PlainObject[] }> {
 	readonly #contextId: number
 	readonly #onConflictId: number
 	readonly #argsDepIds: number[] = []
+	readonly #entityCtxCache: { [rscName: string]: PGEntityCtx<unknown> } = {}
 	pendingRowMap: { [rscName: string]: PgRowBuilder[] } = {}
 	selectPrimaryColumns = false
 
@@ -110,7 +111,10 @@ export class PgCreateStep extends Step<{ items: PlainObject[] }> {
 			for(const [rscName, pendingRows] of Object.entries(builders)) {
 				const rsc = this.resource.registry
 					.pgResources[rscName] as PgTableResource
-				const ctx = getEntityCtx(rsc)
+				const ctx = this.#entityCtxCache[rscName] || getEntityCtx(rsc)
+				if(!this.#entityCtxCache[rscName]) {
+					this.#entityCtxCache[rscName] = ctx
+				}
 
 				let _onConflict = onConflict
 				if(_onConflict === 'replace' && !rsc.extensions?.canUpdate) {

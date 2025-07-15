@@ -139,7 +139,7 @@ export const RateLimitsPlugin: GraphileConfig.Plugin = {
 						: rlsDesc
 				}
 
-				const ogPlan = type.plan
+				const ogPlan = type.plan || type.extensions?.grafast?.plan
 				// we'll wrap the existing plan to add the rate limits step
 				type.plan = (plan, args, info) => {
 					// we'll find if an existing RateLimitsStep is present at
