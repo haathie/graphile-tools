@@ -7,6 +7,13 @@ export const FancyMutationsPlugin: GraphileConfig.Plugin = {
 	name: 'FancyMutationsPlugin',
 	inflection: inflection,
 	schema: {
+		entityBehavior: {
+			pgResource: [
+				'insert',
+				'update',
+				'delete',
+			],
+		},
 		hooks: {
 			'init': initHook,
 			'GraphQLObjectType_fields': fieldsHook,

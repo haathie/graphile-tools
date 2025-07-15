@@ -20,6 +20,11 @@ const preset: GraphileConfig.Preset = {
 		FancyConditionsPlugin,
 		RateLimitsPlugin,
 	],
+	disablePlugins: [
+		'PgMutationCreatePlugin',
+		'PgMutationUpdateDeletePlugin',
+		'NodePlugin',
+	],
 	pgServices: [
 		/* list of PG database configurations, e.g.: */
 		makePgService({

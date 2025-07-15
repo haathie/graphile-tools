@@ -164,7 +164,7 @@ const graphQLSchemaHook: Hook = (subFields, build, ctx) => {
 		const ogFields = ogModel.getFields()
 
 		// if the NodeID plugin is enabled, we'll use that
-		const nodeIdFieldName = inflection.nodeIdFieldName()
+		const nodeIdFieldName = inflection.nodeIdFieldName?.()
 		const nodeIdField = ogFields[nodeIdFieldName]
 
 		let newFields: { [fieldName: string]: GraphQLFieldConfig<any, any> } = {}

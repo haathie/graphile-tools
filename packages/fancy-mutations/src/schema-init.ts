@@ -1,10 +1,9 @@
 import type { lambda } from 'postgraphile/grafast'
 import type { GraphQLFieldConfig, GraphQLObjectType } from 'postgraphile/graphql'
-import { buildFieldsForCreate } from './create-utils.ts'
 import { PgCreateStep } from './PgCreateStep.ts'
 import { PgSelectAndModify } from './PgSelectAndModify.js'
 import type { GrafastPlanParams, PgTableResource } from './types.ts'
-import { isDeletable, isInsertable, isUpdatable } from './utils.ts'
+import { buildFieldsForCreate, isDeletable, isInsertable, isUpdatable } from './utils.ts'
 
 type Hook = NonNullable<
 	NonNullable<

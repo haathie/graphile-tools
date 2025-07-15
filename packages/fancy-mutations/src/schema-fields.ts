@@ -69,7 +69,11 @@ function getBulkDeleteFields(
 
 	return {
 		[deleteFieldName]: fieldWithHooks(
-			{ fieldName: deleteFieldName, isBulkDeleteOperation: true },
+			{
+				fieldName: deleteFieldName,
+				isBulkDeleteOperation: true,
+				pgFieldResource: resource
+			},
 			{
 				args: {
 					condition: {
@@ -125,7 +129,11 @@ function getBulkUpdateFields(
 
 	return {
 		[fieldName]: fieldWithHooks(
-			{ fieldName: fieldName, isBulkUpdateOperation: true },
+			{
+				fieldName: fieldName,
+				isBulkUpdateOperation: true,
+				pgFieldResource: resource
+			},
 			{
 				args: {
 					condition: {
@@ -188,7 +196,11 @@ function getBulkCreateFields(
 
 	return {
 		[fieldName]: fieldWithHooks(
-			{ fieldName: fieldName, isBulkCreateOperation: true },
+			{
+				fieldName: fieldName,
+				isBulkCreateOperation: true,
+				pgFieldResource: resource
+			},
 			{
 				args: {
 					onConflict: {

@@ -272,7 +272,11 @@ export function scrapeCodecFromContext(
 
 	// root mutations don't pass the codec at the moment, so
 	// hack to get the codec from the field name
-	if(isRootMutation) {
+	if(
+		isRootMutation
+		// ensure it's a mutation field we support rate limits for
+		&& Array.from(getRateLimitTypes(ctx)).length
+	) {
 		const { inflection, allPgCodecs, pgTableResource } = build
 		for(const codec of allPgCodecs) {
 			// @ts-expect-error
@@ -281,21 +285,25 @@ export function scrapeCodecFromContext(
 				continue
 			}
 
-			if(fieldName === inflection.createField(rsc)) {
+			if(fieldName === inflection.createField?.(rsc)) {
 				return codec
 			}
 
 			for(const uq of rsc.uniques) {
 				if(
-					fieldName === inflection.updateByKeysField({ resource: rsc, unique: uq })
-					|| fieldName === inflection.updateNodeField({ resource: rsc, unique: uq })
+					fieldName
+						=== inflection.updateByKeysField?.({ resource: rsc, unique: uq })
+					|| fieldName
+						=== inflection.updateNodeField?.({ resource: rsc, unique: uq })
 				) {
 					return codec
 				}
 
 				if(
-					fieldName === inflection.deleteByKeysField({ resource: rsc, unique: uq })
-					|| fieldName === inflection.deleteNodeField({ resource: rsc, unique: uq })
+					fieldName
+						=== inflection.deleteByKeysField?.({ resource: rsc, unique: uq })
+					|| fieldName
+						=== inflection.deleteNodeField?.({ resource: rsc, unique: uq })
 				) {
 					return codec
 				}
