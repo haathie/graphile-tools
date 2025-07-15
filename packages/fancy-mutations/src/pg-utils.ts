@@ -230,7 +230,7 @@ async function _mergeData<T>(
 		SET ${updateStr}
 		FROM items_rn AS i
 		WHERE ${matchClauseStr}
-		${returningColumnsStr || '1'}, i.rn
+		${returningColumnsStr ? `${returningColumnsStr}, i.rn` : 'RETURNING i.rn'}
 	),
 	inserted AS (
 		MERGE INTO ${tableName} AS t
@@ -241,7 +241,7 @@ async function _mergeData<T>(
 		WHEN NOT MATCHED THEN
 			INSERT (${columnsToInsertStr})
 			VALUES (${propsToInsert.map(c => `i."${propertyColumnMap[c]}"`).join(',')})
-		${returningColumnsStr || '1'}, i.rn
+		${returningColumnsStr ? `${returningColumnsStr}, i.rn` : 'RETURNING i.rn'}
 	)
 	`
 	if(returningColumnsStr) {
@@ -263,7 +263,9 @@ async function _mergeData<T>(
 		propsToInsert,
 		valuePlaceholders => {
 			const placeholders = valuePlaceholders.map(p => `(${p.join(',')})`)
-			return query.replace('???', placeholders.join(','))
+			const rslt = query.replace('???', placeholders.join(','))
+			console.log(rslt)
+			return rslt
 		},
 		client
 	)
@@ -363,7 +365,7 @@ function sortAndMergeResultsByBuckets<T>(
 		}
 	}
 
-	return { rowCount, affectedCount, rows }
+	return { rowCount, affectedCount, rows: rows.length ? rows : undefined }
 }
 
 function getUsedProperties<T>(

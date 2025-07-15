@@ -22,12 +22,14 @@ export type GraphQLRequest = {
 	variables?: Record<string, any>
 }
 
-export async function runDdlAndBoot({ ddl, preset }: TestGraphileConfig) {
+export async function runDdlAndBoot(conf: TestGraphileConfig) {
+	await runDdl(conf)
+	return bootPreset(conf.preset, makeRandomPort())
+}
+
+export async function runDdl({ ddl, preset }: TestGraphileConfig) {
 	const pool = getSuperuserPool(preset)
-
 	await pool.query(`BEGIN;\n${ddl}\nCOMMIT;`)
-
-	return bootPreset(preset, makeRandomPort())
 }
 
 export function getSuperuserPool(preset: GraphileConfig.Preset) {
