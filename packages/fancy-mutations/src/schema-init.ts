@@ -1,6 +1,5 @@
-import { pgSelectFromRecords } from 'postgraphile/@dataplan/pg'
-import { lambda } from 'postgraphile/grafast'
-import type { GraphQLObjectType } from 'postgraphile/graphql'
+import type { lambda } from 'postgraphile/grafast'
+import type { GraphQLFieldConfig, GraphQLObjectType } from 'postgraphile/graphql'
 import { buildFieldsForCreate } from './create-utils.ts'
 import { PgCreateStep } from './PgCreateStep.ts'
 import { PgSelectAndModify } from './PgSelectAndModify.js'
@@ -21,16 +20,16 @@ export const initHook: Hook = (
 	registerOnConflictType(build)
 
 	for(const resource of Object.values(pgResources)) {
-		if(isDeletable(build, resource)) {
-			registerDeletePayload(build, resource)
+		const isInsertableResource = isInsertable(build, resource)
+		if(
+			isDeletable(build, resource)
+			|| isUpdatable(build, resource)
+			|| isInsertableResource
+		) {
+			registerBulkMutationPayload(build, resource)
 		}
 
-		if(isUpdatable(build, resource)) {
-			registerUpdatePayload(build, resource)
-		}
-
-		if(isInsertable(build, resource)) {
-			registerCreatePayload(build, resource)
+		if(isInsertableResource) {
 			registerCreateInputObject(build, resource)
 		}
 	}
@@ -38,7 +37,7 @@ export const initHook: Hook = (
 	return config
 }
 
-function registerDeletePayload(
+function registerBulkMutationPayload(
 	build: GraphileBuild.Build,
 	resource: PgTableResource
 ) {
@@ -47,99 +46,23 @@ function registerDeletePayload(
 		grafast: { lambda },
 		graphql: { GraphQLInt, GraphQLNonNull }
 	} = build
-	const payloadName = inflection.bulkDeletePayloadName(resource)
-
-	return build.registerObjectType(
-		payloadName,
-		{
-			isMutationPayload: true,
-			isBulkDeleteObject: true,
-			pgTypeResource: resource,
-		},
-		() => ({
-			description: `Payload for the bulk delete operation on ${resource.name}`,
-			fields({ fieldWithHooks }) {
-				return {
-					affected: {
-						type: new GraphQLNonNull(GraphQLInt),
-						extensions: { grafast: { plan: createRowCountPlan(lambda) } }
-					},
-					items: getOutputItems(
-						resource, { isBulkDeleteItems: true }, build, fieldWithHooks
-					)
-				}
-			}
-		}),
-		`Payload for the bulk delete operation on ${resource.name}`
-	)
-}
-
-
-function registerUpdatePayload(
-	build: GraphileBuild.Build,
-	resource: PgTableResource
-) {
-	const {
-		inflection,
-		grafast: { lambda },
-		graphql: { GraphQLInt, GraphQLNonNull }
-	} = build
-	const payloadName = inflection.bulkUpdatePayloadName(resource)
-
-	return build.registerObjectType(
-		payloadName,
-		{
-			isMutationPayload: true,
-			isBulkUpdateObject: true,
-			pgTypeResource: resource,
-		},
-		() => ({
-			description: `Payload for the bulk update operation on ${resource.name}`,
-			fields({ fieldWithHooks }) {
-				return {
-					affected: {
-						type: new GraphQLNonNull(GraphQLInt),
-						extensions: { grafast: { plan: createRowCountPlan(lambda) } }
-					},
-					items: getOutputItems(
-						resource, { isBulkDeleteItems: true }, build, fieldWithHooks
-					)
-				}
-			}
-		}),
-		`Payload for the bulk update operation on ${resource.name}`
-	)
-}
-
-function registerCreatePayload(
-	build: GraphileBuild.Build,
-	resource: PgTableResource
-) {
-	const {
-		inflection,
-		grafast: { lambda },
-		graphql: { GraphQLInt, GraphQLNonNull }
-	} = build
-	const payloadName = inflection.bulkCreatePayloadName(resource)
+	const payloadName = inflection.bulkMutationPayloadName(resource)
 
 	build.registerObjectType(
 		payloadName,
 		{
-			isMutationPayload: true,
-			isBulkCreateObject: true,
+			isBulkMutationPayloadObject: true,
 			pgTypeResource: resource,
 		},
 		() => ({
 			description: `Payload for the bulk create operation on ${resource.name}`,
-			fields({ fieldWithHooks }) {
+			fields() {
 				return {
 					affected: {
 						type: new GraphQLNonNull(GraphQLInt),
 						extensions: { grafast: { plan: createRowCountPlan(lambda) } }
 					},
-					items: getOutputItems(
-						resource, { isBulkCreateItems: true }, build, fieldWithHooks
-					),
+					items: getOutputItems(resource, build),
 				}
 			}
 		}),
@@ -185,43 +108,77 @@ function createRowCountPlan(
 
 function getOutputItems(
 	resource: PgTableResource,
-	scope: Partial<GraphileBuild.ScopeObjectFieldsField>,
 	build: GraphileBuild.Build,
-	fieldWithHooks: GraphileBuild.ContextObjectFields['fieldWithHooks'],
-) {
-	return fieldWithHooks({ fieldName: 'items', ...scope }, () => {
-		const outputObj = build.getGraphQLTypeByPgCodec(
-			resource.codec, 'output'
-		) as GraphQLObjectType
-		if(!outputObj) {
+): GraphQLFieldConfig<unknown, unknown> {
+	const outputObj = build.getGraphQLTypeByPgCodec(
+		resource.codec, 'output'
+	) as GraphQLObjectType
+	if(!outputObj) {
+		throw new Error(`No output type for resource ${resource.name}`)
+	}
+
+	return {
+		type: new build.graphql.GraphQLList(outputObj),
+		extensions: { grafast: { plan: createSelectAffectedRowsPlan(build) } }
+	}
+}
+
+function createSelectAffectedRowsPlan(build: GraphileBuild.Build) {
+	const { sql, grafast: { lambda }, dataplanPg: { TYPES } } = build
+	return (...[$plan]: GrafastPlanParams<PgCreateStep | PgSelectAndModify>) => {
+		if($plan instanceof PgSelectAndModify) {
+			return $plan
+		}
+
+		if(!($plan instanceof PgCreateStep)) {
+			throw new Error(`Expected a PgCreateStep, got ${$plan}`)
+		}
+
+		$plan.selectPrimaryColumns = true
+
+		const table = $plan.resource
+		const primaryKey = table.uniques.find(u => u.isPrimary)!
+		if(!primaryKey) {
+			// if we don't have a primary key, we can't insert
+			// because we won't be able to return the inserted item
 			throw new Error(
-				`No output type for resource ${resource.name}`
+				`No primary key for resource ${table.name}, cannot select`
 			)
 		}
 
-		return {
-			type: new build.graphql.GraphQLList(outputObj),
-			extensions: {
-				grafast: {
-					plan: ($plan) => {
-						if(!($plan instanceof PgCreateStep)) {
-							throw new Error(
-								`Expected a PgCreateStep, got ${$plan.constructor.name}`
-							)
-						}
+		const pkeyColumnsJoined = sql.join(
+			primaryKey.attributes.map(a => (
+				sql`${sql.identifier(a)} ${table.codec.attributes[a].codec.sqlType}`
+			)),
+			','
+		)
 
-						const $select = pgSelectFromRecords(
-							resource,
-							lambda($plan, p => (console.log(p.items), p.items))
-						)
-						$plan.referenceSelectForSelections($select)
-
-						return $select
-					}
-				}
+		const $items = table.find()
+		const $rowsParam = $items
+			.placeholder(lambda($plan, r => JSON.stringify(r.items)), TYPES.jsonb, true)
+		$items.join(
+			{
+				type: 'inner',
+				from: sql`ROWS FROM (
+					jsonb_to_recordset(${$rowsParam})
+					AS (${pkeyColumnsJoined})) WITH ORDINALITY`,
+				alias: sql`items`,
+				conditions: primaryKey.attributes.map(a => (
+					sql`${$items.alias}.${sql.identifier(a)} = items.${sql.identifier(a)}`
+				))
 			}
-		}
-	})
+		)
+		// order by the ordinal position
+		// so that the items are returned in the same order as they were inserted
+		$items.orderBy({
+			fragment: sql`items.ordinality`,
+			codec: TYPES.int,
+			direction: 'ASC'
+		})
+		$items.setOrderIsUnique()
+
+		return $items
+	}
 }
 
 function registerOnConflictType(

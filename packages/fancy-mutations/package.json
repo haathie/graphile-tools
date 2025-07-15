@@ -3,16 +3,15 @@
 	"version": "0.1.0",
 	"type": "module",
 	"files": ["lib"],
-	"exports": {
-		".": {
-			"import": "./src/index.ts"
-		},
-		"./package.json": "./package.json"
-	},
+	"main": "lib/index.js",
+	"types": "lib/index.d.ts",
 	"scripts": {
 		"build": "tsc -p tsconfig.json"
 	},
 	"dependencies": {
 		"@haathie/postgraphile-common-utils": "^0.1.0"
+	},
+	"peerDependencies": {
+		"postgraphile": "*"
 	}
 }

@@ -5,6 +5,12 @@ export type PGEntityCtx<T> = {
 	uniques: { columns: (keyof T)[] }[]
 }
 
+type InsertQueryResult = {
+	rowCount: number
+	affectedCount: number
+	rows?: readonly unknown[]
+}
+
 type QueryResult = {
 	rowCount: number
 	rows: readonly unknown[]
@@ -84,7 +90,7 @@ async function _insertDataOrDoNothing<T>(
 	client: SimplePgClient,
 	returningColumns: (keyof T)[] | undefined,
 	ctx: PGEntityCtx<T>
-) {
+): Promise<InsertQueryResult> {
 	const { tableName, propertyColumnMap, uniques } = ctx
 	const tmpTableName = getTmpTableNameRand(tableName)
 	const propsToInsert = getUsedProperties(data, ctx)
@@ -137,7 +143,8 @@ async function _insertDataOrDoNothing<T>(
 	SELECT *, 'existing' AS "row_action" FROM existing
 	ORDER BY rn`
 	} else {
-		query += 'SELECT COUNT(*) FROM inserts'
+		query += 'SELECT (SELECT COUNT(*) FROM inserted_rn) AS "total_count"'
+			+ ', (SELECT COUNT(*) FROM inserts) AS "inserted_count"'
 	}
 
 	await client.query(
@@ -155,11 +162,21 @@ async function _insertDataOrDoNothing<T>(
 	)
 
 	if(returningColumnsStr) {
-		rslt.rowCount = rslt.rows
-			.filter((r: any) => r['row_action'] === 'inserted').length
+		return {
+			rowCount: rslt.rowCount,
+			affectedCount: rslt.rows
+				.filter((r: any) => r['row_action'] === 'inserted').length,
+			rows: rslt.rows
+		}
 	}
 
-	return rslt
+	const countData = rslt
+		.rows[0] as { total_count: number, inserted_count: number }
+	return {
+		rowCount: +countData.total_count,
+		affectedCount: +countData.inserted_count,
+		rows: undefined
+	}
 }
 
 /**
@@ -173,7 +190,7 @@ async function _mergeData<T>(
 	onConflict: ConflictHandlingOpts<T>,
 	returningColumns: (keyof T)[] | undefined,
 	ctx: PGEntityCtx<T>
-) {
+): Promise<InsertQueryResult> {
 	const { tableName, propertyColumnMap, uniques } = ctx
 	const tmpTableName = getTmpTableNameRand(tableName)
 	const propsToInsert = getUsedProperties(data, ctx)
@@ -232,6 +249,9 @@ async function _mergeData<T>(
 		UNION ALL
 		SELECT *, 'INSERT' AS "row_action" FROM inserted
 		ORDER BY rn`
+	} else {
+		query += 'SELECT (SELECT COUNT(*) FROM updated) AS "updated_count"'
+			+ ', (SELECT COUNT(*) FROM inserted) AS "inserted_count"'
 	}
 
 	await client.query(
@@ -248,7 +268,18 @@ async function _mergeData<T>(
 		client
 	)
 
-	return rslt
+	if(returningColumnsStr) {
+		return {
+			rowCount: rslt.rowCount,
+			affectedCount: rslt.rowCount,
+			rows: rslt.rows
+		}
+	}
+
+	const countData = rslt
+		.rows[0] as { updated_count: number, inserted_count: number }
+	const rowCount = +countData.updated_count + +countData.inserted_count
+	return { rowCount: rowCount, affectedCount: rowCount }
 }
 
 /**
@@ -256,12 +287,12 @@ async function _mergeData<T>(
  * safe to execute for all sizes of data. It'll automatically
  * trim to the max number of parameters allowed by Postgres.
  */
-function _insertDataSimple<T>(
+async function _insertDataSimple<T>(
 	data: T[],
 	client: SimplePgClient,
 	returningColumns: (keyof T)[] | undefined,
 	ctx: PGEntityCtx<T>,
-) {
+): Promise<InsertQueryResult> {
 	const { tableName, propertyColumnMap } = ctx
 	const propsToInsert = getUsedProperties(data, ctx)
 	const columnsToInsertStr = propsToInsert
@@ -269,7 +300,7 @@ function _insertDataSimple<T>(
 	const returningColumnsStr = returningColumns
 		? `RETURNING ${returningColumns.map(c => `"${propertyColumnMap[c]}"`).join(',')}`
 		: ''
-	return executePgParameteredQuery(
+	const rslt = await executePgParameteredQuery(
 		data,
 		propsToInsert,
 		valuePlaceholders => {
@@ -283,6 +314,12 @@ function _insertDataSimple<T>(
 		},
 		client
 	)
+
+	return {
+		rowCount: rslt.rowCount,
+		affectedCount: rslt.rowCount,
+		rows: returningColumnsStr ? rslt.rows : undefined
+	}
 }
 
 function bucketEntitiesByProperties<T>(entities: T[], ctx: PGEntityCtx<T>) {
@@ -300,9 +337,10 @@ function bucketEntitiesByProperties<T>(entities: T[], ctx: PGEntityCtx<T>) {
 function sortAndMergeResultsByBuckets<T>(
 	buckets: T[][],
 	entities: T[],
-	results: QueryResult[]
+	results: InsertQueryResult[]
 ) {
 	let rowCount = 0
+	let affectedCount = 0
 	const rows: unknown[] = []
 	const entityToIndexMap = new Map<T, number>()
 	for(const [index, entity] of entities.entries()) {
@@ -312,7 +350,8 @@ function sortAndMergeResultsByBuckets<T>(
 	for(const [bucketIndex, bucket] of buckets.entries()) {
 		const result = results[bucketIndex]
 		rowCount += result.rowCount
-		if(!result.rows.length) {
+		affectedCount += result.affectedCount
+		if(!result.rows?.length) {
 			continue
 		}
 
@@ -324,7 +363,7 @@ function sortAndMergeResultsByBuckets<T>(
 		}
 	}
 
-	return { rowCount, rows }
+	return { rowCount, affectedCount, rows }
 }
 
 function getUsedProperties<T>(

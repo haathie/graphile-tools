@@ -10,7 +10,6 @@ export const FancyMutationsPlugin: GraphileConfig.Plugin = {
 		hooks: {
 			'init': initHook,
 			'GraphQLObjectType_fields': fieldsHook,
-			// GraphQLSchema: graphQLSchemaHook
 		}
 	}
 }

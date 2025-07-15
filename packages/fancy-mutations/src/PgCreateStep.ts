@@ -1,4 +1,3 @@
-import type { PgSelectStep } from 'postgraphile/@dataplan/pg'
 import type { NodePostgresPgClient } from 'postgraphile/adaptors/pg'
 import { context, type ExecutionDetails, type ExecutionResults, type Maybe, Modifier, Step } from 'postgraphile/grafast'
 import { GraphQLError } from 'postgraphile/graphql'
@@ -24,8 +23,8 @@ export class PgCreateStep extends Step<{ items: PlainObject[] }> {
 	readonly #contextId: number
 	readonly #onConflictId: number
 	readonly #argsDepIds: number[] = []
-	readonly pendingRowMap: { [rscName: string]: PgRowBuilder[] } = {}
-	#referencedSelect: PgSelectStep | undefined
+	pendingRowMap: { [rscName: string]: PgRowBuilder[] } = {}
+	selectPrimaryColumns = false
 
 	constructor(
 		resource: PgTableResource,
@@ -54,6 +53,8 @@ export class PgCreateStep extends Step<{ items: PlainObject[] }> {
 		} = values[this.#contextId].unaryValue() as Grafast.Context
 
 		return indexMap(async i => {
+			this.pendingRowMap = {}
+
 			for(const applyDepId of this.#argsDepIds) {
 				const callback = values[applyDepId].at(i)
 				if(Array.isArray(callback)) {
@@ -101,19 +102,6 @@ export class PgCreateStep extends Step<{ items: PlainObject[] }> {
 		return new PgRowBuilder(this)
 	}
 
-	referenceSelectForSelections(select: PgSelectStep) {
-		if(this.#referencedSelect) {
-			throw new Error(
-				'INTERNAL ERROR: Cannot reference select for selections more than once'
-			)
-		}
-
-		// select.
-
-		this.#referencedSelect = select
-		return select
-	}
-
 	async #execute(client: NodePostgresPgClient, onConflict: OnConflictOption) {
 		const resolvedRowMap: { [rscName: string]: PgRowBuilder[] } = {}
 
@@ -129,13 +117,11 @@ export class PgCreateStep extends Step<{ items: PlainObject[] }> {
 					_onConflict = 'ignore'
 				}
 
-				const colsToReturn = new Set<string>(
-					[...ctx.idProperties]
-				)
-
-				if(this.#referencedSelect?.resource === rsc) {
-					colsToReturn.add('full_img')
-					// console.log('referencedSelect', this.#referencedSelect)
+				const colsToReturn = new Set<string>()
+				if(this.selectPrimaryColumns && rsc === this.resource) {
+					for(const attr of ctx.idProperties) {
+						colsToReturn.add(attr)
+					}
 				}
 
 				const values: PlainObject[] = []
@@ -146,28 +132,38 @@ export class PgCreateStep extends Step<{ items: PlainObject[] }> {
 					}
 				}
 
-				const { rows } = await insertData<{ [_: string]: unknown }>(
+				const {
+					rows,
+					rowCount,
+				} = await insertData<{ [_: string]: unknown }>(
 					values,
 					client.rawClient,
 					_onConflict === 'error' ? undefined : { type: _onConflict },
 					Array.from(colsToReturn),
 					ctx
 				)
-				if(rows.length !== values.length) {
+
+				if(rowCount !== values.length) {
 					throw new Error(
 						'INTERNAL: Expected the number of rows returned to match the number'
-						+ ` of rows inserted, got ${rows.length} vs ${pendingRows.length}, `
+						+ ` of rows inserted, got ${rowCount} vs ${values.length}, `
 						+ `for resource ${rsc.name}`
 					)
 				}
 
-				// we'll mark the rows as resolved
-				// and remove from pendingRows
-				for(const [i, row] of rows.entries()) {
-					const rb = pendingRows[i]
-					rb.onValuesResolved(row as PlainObject)
+				if(rows) {
+					// we'll mark the rows as resolved
+					// and remove from pendingRows
+					for(const [i, row] of rows.entries()) {
+						const rb = pendingRows[i]
+						rb.onValuesResolved(row as PlainObject)
+						resolvedRowMap[rscName] ||= []
+						resolvedRowMap[rscName].push(rb)
+					}
+				} else {
+					// no rows returned, so we just remove the pending rows
 					resolvedRowMap[rscName] ||= []
-					resolvedRowMap[rscName].push(rb)
+					resolvedRowMap[rscName].push(...pendingRows)
 				}
 
 				this.pendingRowMap[rscName] = this.pendingRowMap[rscName]

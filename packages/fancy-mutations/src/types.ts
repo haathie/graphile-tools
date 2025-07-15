@@ -12,27 +12,22 @@ export type OnConflictOption = 'error' | 'ignore' | 'replace'
 declare global {
 	namespace GraphileBuild {
 		interface Inflection {
-			bulkUpdateOperationName(resource: PgResource): string
-			bulkUpdatePayloadName(resource: PgResource): string
-
-			bulkDeleteOperationName(resource: PgResource): string
-			bulkDeletePayloadName(resource: PgResource): string
-
 			onConflictEnumName(): string
 
+			bulkMutationPayloadName(resource: PgResource): string
+
+			bulkUpdateOperationName(resource: PgResource): string
+
+			bulkDeleteOperationName(resource: PgResource): string
+
 			bulkCreateOperationName(resource: PgResource): string
-			bulkCreatePayloadName(resource: PgResource): string
 
 			bulkCreateInputObjectName(resource: PgResource): string
-			bulkCreateInputObjectRelationName(
-				path: string[]
-			): string
+			bulkCreateInputObjectRelationName(path: string[]): string
 		}
 
 		interface ScopeObject {
-			isBulkDeleteObject?: boolean
-			isBulkUpdateObject?: boolean
-			isBulkCreateObject?: boolean
+			isBulkMutationPayloadObject?: boolean
 		}
 
 		interface ScopeInputObject {

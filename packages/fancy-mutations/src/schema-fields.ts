@@ -84,7 +84,7 @@ function getBulkDeleteFields(
 					}
 				},
 				type: getOutputTypeByName(
-					inflection.bulkDeletePayloadName(resource)
+					inflection.bulkMutationPayloadName(resource)
 				),
 				extensions: { grafast: { plan } },
 				description: `Delete one or more ${resource.name} items`
@@ -150,7 +150,7 @@ function getBulkUpdateFields(
 					}
 				},
 				type: getOutputTypeByName(
-					inflection.bulkUpdatePayloadName(resource)
+					inflection.bulkMutationPayloadName(resource)
 				),
 				extensions: { grafast: { plan } },
 				description: `Update one or more ${resource.name} items`
@@ -214,7 +214,7 @@ function getBulkCreateFields(
 					}
 				},
 				type: getOutputTypeByName(
-					inflection.bulkCreatePayloadName(resource)
+					inflection.bulkMutationPayloadName(resource)
 				),
 				extensions: { grafast: { plan } },
 				description: `Create one or more ${resource.name} items`
