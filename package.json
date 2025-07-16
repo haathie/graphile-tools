@@ -15,6 +15,7 @@
     "lint:fix": "eslint ./src --fix --ext .js,.ts,.jsx,.tsx",
     "run-file": "sh scripts/run-with-env.sh",
     "test": "NODE_ENV=test sh scripts/run-with-env.sh --test",
+    "test:only": "NODE_ENV=test sh scripts/run-with-env.sh --test-only",
     "start:contacts-example": "npm run run-file -- packages/contacts-example/src/start-server.ts"
   },
   "keywords": [],

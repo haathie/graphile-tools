@@ -8,11 +8,17 @@ export const CONFIG: TestGraphileConfig = {
     DROP SCHEMA IF EXISTS fancy_mutations_test CASCADE;
     CREATE SCHEMA IF NOT EXISTS fancy_mutations_test;
 
+		CREATE TYPE "fancy_mutations_test"."bio_data" AS (
+			age INT,
+			favourite_genre TEXT
+		);
+
     CREATE TABLE IF NOT EXISTS "fancy_mutations_test"."authors" (
 			id SERIAL PRIMARY KEY,
 			name TEXT NOT NULL,
-			bio TEXT,
-			metadata JSONB
+			bio "fancy_mutations_test"."bio_data",
+			metadata JSONB,
+			nickname TEXT
     );
 		CREATE UNIQUE INDEX IF NOT EXISTS "authors_name_idx"
 			ON "fancy_mutations_test"."authors"(name);

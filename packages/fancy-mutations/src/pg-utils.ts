@@ -5,10 +5,17 @@ export type PGEntityCtx<T> = {
 	uniques: { columns: (keyof T)[] }[]
 }
 
-type InsertQueryResult = {
+type ObjectRow = { [_: string]: unknown }
+
+type InsertRow<T = ObjectRow> = T & {
+	rn: number
+	row_action: 'INSERT' | 'EXISTING' | 'DUPLICATE' | 'UPDATE'
+}
+
+type InsertQueryResult<T = ObjectRow> = {
 	rowCount: number
 	affectedCount: number
-	rows?: readonly unknown[]
+	rows?: readonly InsertRow<T>[]
 }
 
 type QueryResult = {
@@ -18,11 +25,6 @@ type QueryResult = {
 
 export type SimplePgClient = {
 	query(query: string, params?: unknown[]): Promise<QueryResult>
-}
-
-type BulkUpdateEntity<T> = {
-	id: T
-	update: Partial<T>
 }
 
 /**
@@ -70,218 +72,19 @@ export async function insertData<T>(
 			bucketEntitiesByProperties(entities, ctx)
 		)
 		const rslts = await Promise.all(buckets.map(
-			(bucket) => _mergeData(bucket, client, onConflict, returningColumns, ctx)
+			(bucket) => _deDuplicatedMerge(
+				bucket, client, returningColumns, onConflict, ctx
+			)
 		))
 		return sortAndMergeResultsByBuckets(buckets, entities, rslts)
 	case 'update':
-		return _mergeData(entities, client, onConflict, returningColumns, ctx)
 	case 'ignore':
-		// if we ignore, we can just insert the data and ignore errors
-		return _insertDataOrDoNothing(entities, client, returningColumns, ctx)
+		return _deDuplicatedMerge(entities, client, returningColumns, onConflict, ctx)
 	case undefined:
 		return _insertDataSimple(entities, client, returningColumns, ctx)
 	default:
 		throw new Error(`Unknown conflict handling type: ${onConflict}`)
 	}
-}
-
-async function _insertDataOrDoNothing<T>(
-	data: T[],
-	client: SimplePgClient,
-	returningColumns: (keyof T)[] | undefined,
-	ctx: PGEntityCtx<T>
-): Promise<InsertQueryResult> {
-	const { tableName, propertyColumnMap, uniques } = ctx
-	const tmpTableName = getTmpTableNameRand(tableName)
-	const propsToInsert = getUsedProperties(data, ctx)
-	const columnsToInsertStr = propsToInsert
-		.map(c => `"${propertyColumnMap[c]}"`)
-		.join(',')
-	const matchClauseStr = uniques
-		.map(u => (
-			u.columns.reduce((acc, p) => {
-				const col = propertyColumnMap[p]
-				return acc + (acc ? ' AND ' : '') + `t."${col}" = i."${col}"`
-			}, '')
-		))
-		.map(c => `(${c})`)
-		.join(' OR ')
-	const returningColumnsStr = returningColumns
-		?.map(c => `t."${propertyColumnMap[c]}"`).join(',')
-
-	// we'll match all possible unique constraints
-	// and get the "returning" columns of the existing entities
-	let query = `
-	WITH inserted0 AS (
-		INSERT INTO ${tmpTableName} (${columnsToInsertStr})
-		VALUES ???
-		RETURNING *
-	),
-	inserted_rn AS (
-		SELECT *, row_number() over () AS rn FROM inserted0
-	),
-	existing AS (
-		SELECT ${returningColumnsStr || '1'}, i.rn
-		FROM ${tableName} AS t
-		INNER JOIN inserted_rn AS i ON ${matchClauseStr}
-	),
-	inserts AS (
-		MERGE INTO ${tableName} AS t
-		USING inserted_rn AS i
-		ON ${matchClauseStr}
-		WHEN MATCHED THEN
-			DO NOTHING
-		WHEN NOT MATCHED THEN
-			INSERT (${columnsToInsertStr})
-			VALUES (${propsToInsert.map(c => `i."${propertyColumnMap[c]}"`).join(',')})
-		RETURNING ${returningColumnsStr || '1'}, i.rn
-	)
-	`
-	if(returningColumnsStr) {
-		query += `SELECT *, 'inserted' AS "row_action" FROM inserts
-	UNION ALL
-	SELECT *, 'existing' AS "row_action" FROM existing
-	ORDER BY rn`
-	} else {
-		query += 'SELECT (SELECT COUNT(*) FROM inserted_rn) AS "total_count"'
-			+ ', (SELECT COUNT(*) FROM inserts) AS "inserted_count"'
-	}
-
-	await client.query(
-		`CREATE TEMP TABLE ${tmpTableName}
-		(LIKE ${tableName} INCLUDING DEFAULTS) ON COMMIT DROP;`
-	)
-	const rslt = await executePgParameteredQuery(
-		data,
-		propsToInsert,
-		valuePlaceholders => {
-			const placeholders = valuePlaceholders.map(p => `(${p.join(',')})`)
-			return query.replace('???', placeholders.join(','))
-		},
-		client
-	)
-
-	if(returningColumnsStr) {
-		return {
-			rowCount: rslt.rowCount,
-			affectedCount: rslt.rows
-				.filter((r: any) => r['row_action'] === 'inserted').length,
-			rows: rslt.rows
-		}
-	}
-
-	const countData = rslt
-		.rows[0] as { total_count: number, inserted_count: number }
-	return {
-		rowCount: +countData.total_count,
-		affectedCount: +countData.inserted_count,
-		rows: undefined
-	}
-}
-
-/**
- * Inserts the following entities into Postgres. This is
- * safe to execute for all sizes of data. It'll automatically
- * trim to the max number of parameters allowed by Postgres.
- */
-async function _mergeData<T>(
-	data: T[],
-	client: SimplePgClient,
-	onConflict: ConflictHandlingOpts<T>,
-	returningColumns: (keyof T)[] | undefined,
-	ctx: PGEntityCtx<T>
-): Promise<InsertQueryResult> {
-	const { tableName, propertyColumnMap, uniques } = ctx
-	const tmpTableName = getTmpTableNameRand(tableName)
-	const propsToInsert = getUsedProperties(data, ctx)
-	const propsToUpdate = onConflict.type === 'update'
-		? onConflict.properties
-		: propsToInsert
-	const columnsToInsertStr = propsToInsert
-		.map(c => `"${propertyColumnMap[c]}"`)
-	const updateStr = propsToUpdate
-		.map(c => `"${propertyColumnMap[c]}" = i."${propertyColumnMap[c]}"`)
-		.join(',')
-
-	const returningColumnsStr = returningColumns?.length
-		? `RETURNING
-				${returningColumns.map(c => `t."${propertyColumnMap[c]}"`).join(',')}`
-		: ''
-	const matchClauseStr = uniques
-		.map(u => (
-			u.columns.reduce((acc, p) => {
-				const col = propertyColumnMap[p]
-				return acc + (acc ? ' AND ' : '') + `t."${col}" = i."${col}"`
-			}, '')
-		))
-		.map(c => `(${c})`)
-		.join(' OR ')
-
-	let query = `WITH items AS (
-		INSERT INTO ${tmpTableName} (${columnsToInsertStr})
-		VALUES ???
-		RETURNING *
-	),
-	items_rn AS (
-		SELECT *, row_number() over () AS rn FROM items
-	),
-	updated AS (
-		UPDATE ${tableName} AS t
-		SET ${updateStr}
-		FROM items_rn AS i
-		WHERE ${matchClauseStr}
-		${returningColumnsStr ? `${returningColumnsStr}, i.rn` : 'RETURNING i.rn'}
-	),
-	inserted AS (
-		MERGE INTO ${tableName} AS t
-		USING items_rn AS i
-		ON ${matchClauseStr}
-		WHEN MATCHED THEN
-			DO NOTHING
-		WHEN NOT MATCHED THEN
-			INSERT (${columnsToInsertStr})
-			VALUES (${propsToInsert.map(c => `i."${propertyColumnMap[c]}"`).join(',')})
-		${returningColumnsStr ? `${returningColumnsStr}, i.rn` : 'RETURNING i.rn'}
-	)
-	`
-	if(returningColumnsStr) {
-		query += `SELECT *, 'UPDATE' AS "row_action" FROM updated
-		UNION ALL
-		SELECT *, 'INSERT' AS "row_action" FROM inserted
-		ORDER BY rn`
-	} else {
-		query += 'SELECT (SELECT COUNT(*) FROM updated) AS "updated_count"'
-			+ ', (SELECT COUNT(*) FROM inserted) AS "inserted_count"'
-	}
-
-	await client.query(
-		`CREATE TEMP TABLE ${tmpTableName}
-		(LIKE ${tableName} INCLUDING DEFAULTS) ON COMMIT DROP;`
-	)
-	const rslt = await executePgParameteredQuery(
-		data,
-		propsToInsert,
-		valuePlaceholders => {
-			const placeholders = valuePlaceholders.map(p => `(${p.join(',')})`)
-			const rslt = query.replace('???', placeholders.join(','))
-			console.log(rslt)
-			return rslt
-		},
-		client
-	)
-
-	if(returningColumnsStr) {
-		return {
-			rowCount: rslt.rowCount,
-			affectedCount: rslt.rowCount,
-			rows: rslt.rows
-		}
-	}
-
-	const countData = rslt
-		.rows[0] as { updated_count: number, inserted_count: number }
-	const rowCount = +countData.updated_count + +countData.inserted_count
-	return { rowCount: rowCount, affectedCount: rowCount }
 }
 
 /**
@@ -302,7 +105,7 @@ async function _insertDataSimple<T>(
 	const returningColumnsStr = returningColumns
 		? `RETURNING ${returningColumns.map(c => `"${propertyColumnMap[c]}"`).join(',')}`
 		: ''
-	const rslt = await executePgParameteredQuery(
+	const rslt = await executePgParameteredQuery<T, ObjectRow>(
 		data,
 		propsToInsert,
 		valuePlaceholders => {
@@ -320,7 +123,171 @@ async function _insertDataSimple<T>(
 	return {
 		rowCount: rslt.rowCount,
 		affectedCount: rslt.rowCount,
-		rows: returningColumnsStr ? rslt.rows : undefined
+		rows: returningColumnsStr
+			? rslt.rows.map((r, i): InsertRow => (
+				{ ...r, 'row_action': 'INSERT', rn: i + 1 }
+			))
+			: undefined
+	}
+}
+
+async function _deDuplicatedMerge<T>(
+	data: T[],
+	client: SimplePgClient,
+	returningColumns: (keyof T)[] | undefined,
+	onConflict: { type: 'ignore' | 'replace' }
+		| { type: 'update', properties: (keyof T)[] },
+	ctx: PGEntityCtx<T>,
+): Promise<InsertQueryResult> {
+	const { tableName, propertyColumnMap } = ctx
+	const tmpTableName = getTmpTableNameRand(tableName)
+	const propsToInsert = getUsedProperties(data, ctx)
+	const columnsToInsertStr = propsToInsert
+		.map(c => `"${propertyColumnMap[c]}"`)
+		.join(',')
+	const returningColumnsStr = returningColumns
+		?.map(c => `t."${propertyColumnMap[c]}"`).join(',')
+
+	const propsToUpdate = onConflict.type === 'update'
+		? onConflict.properties
+		: (onConflict.type === 'replace' ? propsToInsert : undefined)
+	const updateStr = propsToUpdate
+		?.map(c => `"${propertyColumnMap[c]}" = i."${propertyColumnMap[c]}"`)
+		.join(',')
+	const whenMatchedClause = updateStr
+		? `WHEN MATCHED THEN
+			UPDATE SET ${updateStr}`
+		: undefined
+
+	const {
+		sql: dedupeSql, dupMatchClause
+	} = getDeDuplicatedRowBuilder(propsToInsert, ctx)
+
+	// we'll match all possible unique constraints
+	// and get the "returning" columns of the existing entities
+	let query = `
+	${dedupeSql},
+	inserted_rows AS (
+		MERGE INTO ${tableName} AS t
+		USING rows_to_insert_deduped AS i
+		ON ${dupMatchClause}
+		${whenMatchedClause || ''}
+		WHEN NOT MATCHED THEN
+			INSERT (${columnsToInsertStr})
+			VALUES (${propsToInsert.map(c => `i."${propertyColumnMap[c]}"`).join(',')})
+		RETURNING ${returningColumnsStr || '1'}, i.rn, i.dups, merge_action() as "merge_action"
+	)
+	`
+	if(returningColumnsStr) {
+		query += `,
+		inserts AS (
+			SELECT
+				${returningColumnsStr},
+				i.rn,
+				(
+					CASE WHEN i.rn = t.dups[1]
+					THEN t.merge_action
+					ELSE 'DUPLICATE'
+					END
+				) as "row_action"
+			FROM rows_to_insert_rn AS i
+			INNER JOIN inserted_rows AS t ON i.rn = ANY(t.dups)
+		)`
+		if(onConflict.type === 'ignore') {
+			query += `SELECT * FROM inserts
+			UNION ALL
+			(
+				SELECT ${returningColumnsStr}, i.rn, 'EXISTING' as "row_action"
+				FROM ${tableName} AS t
+				INNER JOIN rows_to_insert_deduped AS i
+					ON (${dupMatchClause}) AND i.rn NOT IN (SELECT rn FROM inserts)
+			)
+			ORDER BY rn`
+		} else {
+			query += 'SELECT * FROM inserts ORDER BY rn'
+		}
+	} else {
+		query += 'SELECT (SELECT COUNT(*) FROM rows_to_insert_rn) AS "total_count"'
+			+ ', (SELECT COUNT(*) FROM inserted_rows) AS "inserted_count"'
+	}
+
+	await client.query(
+		`CREATE TEMP TABLE ${tmpTableName}
+		(LIKE ${tableName} INCLUDING DEFAULTS) ON COMMIT DROP;`
+	)
+	const rslt = await executePgParameteredQuery<T, InsertRow>(
+		data,
+		propsToInsert,
+		valuePlaceholders => {
+			const placeholders = valuePlaceholders.map(p => `(${p.join(',')})`)
+			return query.replace('???', placeholders.join(','))
+		},
+		client
+	)
+
+	if(returningColumnsStr) {
+		return {
+			rowCount: rslt.rowCount,
+			affectedCount: rslt.rows
+				.filter(r => (
+					r['row_action'] === 'INSERT'
+					|| r['row_action'] === 'UPDATE'
+				)).length,
+			rows: rslt.rows
+		}
+	}
+
+	const countData = rslt
+		.rows[0] as unknown as { total_count: string, inserted_count: string }
+	return {
+		rowCount: +countData.total_count,
+		affectedCount: +countData.inserted_count,
+		rows: undefined
+	}
+}
+
+function getDeDuplicatedRowBuilder<T>(
+	propsBeingInserted: (keyof T)[],
+	{ propertyColumnMap, uniques }: PGEntityCtx<T>
+) {
+	const columnsToInsertStr = propsBeingInserted
+		.map(c => `"${propertyColumnMap[c]}"`)
+		.join(',')
+	const dupMatches: string[] = []
+	for(const { columns } of uniques) {
+		const relevantProps = columns
+			.filter(c => propsBeingInserted.includes(c))
+		// if no properties are being inserted that match the unique constraint,
+		// we can skip this unique constraint
+		if(!relevantProps.length) {
+			continue
+		}
+
+		const uqPropsStr = relevantProps
+			.map(p => `i."${propertyColumnMap[p]}" = t."${propertyColumnMap[p]}"`)
+			.join(' AND ')
+		dupMatches.push(`(${uqPropsStr})`)
+	}
+
+	const dupMatchClause = dupMatches.length
+		? dupMatches.join(' OR ')
+		: undefined
+	const dupMatchesStr = dupMatchClause
+		? `(select array_agg(rn) from rows_to_insert_rn t where ${dupMatchClause}) as dups`
+		: 'ARRAY[rn] as dups'
+
+	return {
+		sql: `WITH rows_to_insert_rn AS (
+			SELECT *, row_number() over () as rn
+			FROM (VALUES ???) AS t(${columnsToInsertStr})
+		),
+		rows_to_insert_dups AS (
+			SELECT *, ${dupMatchesStr} FROM rows_to_insert_rn i
+		),
+		rows_to_insert_deduped AS (
+			SELECT * FROM rows_to_insert_dups WHERE rn = dups[1]
+		)`,
+		dupMatchClause,
 	}
 }
 
@@ -336,14 +303,14 @@ function bucketEntitiesByProperties<T>(entities: T[], ctx: PGEntityCtx<T>) {
 	return buckets
 }
 
-function sortAndMergeResultsByBuckets<T>(
+function sortAndMergeResultsByBuckets<T, R>(
 	buckets: T[][],
 	entities: T[],
-	results: InsertQueryResult[]
+	results: InsertQueryResult<R>[]
 ) {
 	let rowCount = 0
 	let affectedCount = 0
-	const rows: unknown[] = []
+	const rows: InsertRow<R>[] = []
 	const entityToIndexMap = new Map<T, number>()
 	for(const [index, entity] of entities.entries()) {
 		entityToIndexMap.set(entity, index)
@@ -383,117 +350,7 @@ function getUsedProperties<T>(
 	return Array.from(usedProperties)
 }
 
-/**
- * Bulk remove the following entities from Postgres. It'll
- * automatically trim to the max number of parameters allowed
- */
-export function deleteData<T>(
-	data: T[],
-	client: SimplePgClient,
-	{ tableName, idProperties, propertyColumnMap }: PGEntityCtx<T>
-) {
-	const idTuple = idProperties
-		.map(p => `"${propertyColumnMap[p]}"`)
-		.join(',')
-	return executePgParameteredQuery(
-		data,
-		idProperties,
-		placeholders => {
-			const joined = placeholders
-				.map(p => `(${p.join(',')})`)
-				.join(',')
-			return `
-			DELETE FROM "${tableName}"
-			WHERE (${idTuple}) IN (VALUES ${joined})
-			`
-		},
-		client
-	)
-}
-
-/**
- * Bulk update the following entities in Postgres. It'll group
- * together updates that have the same properties to update and
- * execute them in a single query.
- */
-export async function updateData<T>(
-	objects: BulkUpdateEntity<T>[],
-	client: SimplePgClient,
-	ctx: PGEntityCtx<T>
-) {
-	if(!objects.length) {
-		return
-	}
-
-	const updateMap: { [key: string]: T[] } = {}
-	for(const { id, update } of objects) {
-		let updatedColsStr = ''
-		for(const key in update) {
-			if(update[key] !== undefined) {
-				updatedColsStr += key + ','
-			}
-		}
-
-		if(!updatedColsStr) {
-			continue
-		}
-
-		updateMap[updatedColsStr] ||= []
-		updateMap[updatedColsStr].push({ ...id, ...update })
-	}
-
-	await Promise.all(
-		Object.entries(updateMap).map(async([updatedColsStr, bulkUpdates]) => (
-			updateDataSpecific(
-				bulkUpdates,
-				// remove last comma (as we added an extra one in the loop)
-				updatedColsStr.split(',').slice(0, -1) as (keyof T)[],
-				client,
-				ctx
-			)
-		))
-	)
-}
-
-/**
- * Bulk update the specfied properties "propertiesToUpdate" of the
- * provided entities.
- */
-async function updateDataSpecific<T>(
-	objects: T[],
-	propertiesToUpdate: (keyof T)[],
-	client: SimplePgClient,
-	{ tableName, idProperties, propertyColumnMap }: PGEntityCtx<T>
-) {
-	const allProperties = [...idProperties, ...propertiesToUpdate]
-	const props = propertiesToUpdate
-		.map(p => `"${propertyColumnMap[p]}" = u."${propertyColumnMap[p]}"`)
-		.join(',')
-	const allCols = allProperties
-		.map(p => `"${propertyColumnMap[p]}"`)
-		.join(',')
-	const idMatch = idProperties
-		.map(p => `t."${propertyColumnMap[p]}" = u."${propertyColumnMap[p]}"`)
-		.join(' AND ')
-
-	return executePgParameteredQuery(
-		objects,
-		allProperties,
-		valuePlaceholders => {
-			const values = valuePlaceholders
-				.map(p => `(${p.join(',')})`)
-				.join(',')
-			return `
-			UPDATE "${tableName}" AS t
-			SET ${props} FROM (VALUES ${values}) AS u(${allCols})
-			WHERE ${idMatch}
-			`
-		},
-		client
-	)
-}
-
-async function executePgParameteredQuery<T>(
+async function executePgParameteredQuery<T, R = unknown>(
 	data: T[],
 	propertiesToExtract: (keyof T)[],
 	buildQuery: (valuePlaceholders: string[][]) => string,
@@ -507,10 +364,10 @@ async function executePgParameteredQuery<T>(
 
 	const results = await Promise.all(queries.map(([q, p]) => client.query(q, p)))
 	let rowCount = 0
-	const rows: unknown[] = []
+	const rows: R[] = []
 	for(const r of results) {
 		rowCount += r.rowCount
-		rows.push(...r.rows)
+		rows.push(...r.rows as R[])
 	}
 
 	return { rowCount, rows }

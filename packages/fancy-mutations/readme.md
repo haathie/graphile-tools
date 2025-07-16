@@ -99,29 +99,6 @@ We've 3 options for handling conflicts when inserting/upserting records:
 - `DoNothing`: This will insert a new record if it doesn't exist, but if it does exist, it will not update the existing record. This is useful when you want to ensure that no changes are made to existing records.
 - `Error`: Plain insert (default). This will throw an error if the record already exists. This is useful when you want to ensure that no existing records are modified, and you want to be notified of any conflicts.
 
-TODO: if an object is repeated in the same mutation, the `replace` option errors out. Eg.
-```graphql
-mutation UpsertContacts {
-	createContacts(input: {
-		onConflict: Replace,
-		items: [
-			{
-				name: "John Doe",
-			},
-			{
-				name: "John Doe", # this will error out
-			}
-		]
-	}) {
-		affected
-		items {
-			rowId
-			name
-		}
-	}
-}
-```
-
 ## Bulk Update Mutations
 
 The bulk update mutation allows you to update records matched by an arbitrary filter specified by the resource's `connection` `condition` argument. This means you can update multiple records in a single mutation, without having to specify each record individually.
