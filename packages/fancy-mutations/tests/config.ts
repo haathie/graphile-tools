@@ -40,16 +40,6 @@ export const CONFIG: TestGraphileConfig = {
 	preset: {
 		extends: [PostGraphileAmberPreset],
 		plugins: [FancyMutationsPlugin],
-		grafast: {
-			context(ctx) {
-				const userId = ctx.http?.getHeader('x-user-id')
-				if(!userId) {
-					return {}
-				}
-
-				return { userId }
-			},
-		},
 		pgServices: [
 			makePgService({
 				// Database connection string, read from an environmental variable:

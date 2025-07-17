@@ -7,11 +7,27 @@ export const FancyMutationsPlugin: GraphileConfig.Plugin = {
 	name: 'FancyMutationsPlugin',
 	inflection: inflection,
 	schema: {
+		behaviorRegistry: {
+			'add': {
+				'bulkCreate': {
+					description: 'Add bulk create (insert + upsert) mutation',
+					entities: ['pgResource']
+				},
+				'bulkUpdate': {
+					description: 'Add bulk update mutation',
+					entities: ['pgResource']
+				},
+				'bulkDelete': {
+					description: 'Add bulk delete mutation',
+					entities: ['pgResource']
+				}
+			}
+		},
 		entityBehavior: {
 			pgResource: [
-				'insert',
-				'update',
-				'delete',
+				'bulkCreate',
+				'bulkUpdate',
+				'bulkDelete',
 			],
 		},
 		hooks: {

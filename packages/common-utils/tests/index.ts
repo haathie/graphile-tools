@@ -91,10 +91,7 @@ async function graphqlRequest<T>(
 ) {
 	const response = await fetch(url, {
 		method: 'POST',
-		headers: {
-			'content-type': 'application/json',
-			...headers
-		},
+		headers: { 'content-type': 'application/json', ...headers },
 		body: JSON.stringify(gqlReq)
 	})
 

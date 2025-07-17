@@ -11,6 +11,13 @@ export type OnConflictOption = 'error' | 'ignore' | 'replace'
 
 declare global {
 	namespace GraphileBuild {
+
+		interface BehaviorStrings {
+			'bulkCreate': true
+			'bulkUpdate': true
+			'bulkDelete': true
+		}
+
 		interface Inflection {
 			onConflictEnumName(): string
 
