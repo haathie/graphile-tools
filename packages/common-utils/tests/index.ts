@@ -96,8 +96,13 @@ async function graphqlRequest<T>(
 	})
 
 	if(!response.ok) {
-		if(response.headers.get('content-type')?.includes('application/json')) {
+		const contentType = response.headers.get('content-type')
+		if(
+			contentType?.includes('application/json')
+			|| contentType?.includes('application/graphql-response+json')
+		) {
 			const json = await response.json()
+			console.log('GraphQL request failed:', json)
 			throw new GraphQLError(
 				`GraphQL request failed: ${response.status}`,
 				{

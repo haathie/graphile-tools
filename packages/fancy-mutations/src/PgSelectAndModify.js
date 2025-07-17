@@ -1,4 +1,4 @@
-import { PgSelectStep } from 'postgraphile/@dataplan/pg'
+import { PgResource, PgSelectStep } from 'postgraphile/@dataplan/pg'
 import { sql } from 'postgraphile/pg-sql2'
 
 /**
@@ -22,33 +22,11 @@ export class PgSelectAndModify extends PgSelectStep {
 	 * @param {import('postgraphile/@dataplan/pg').PgSelectOptions} opts
 	 */
 	constructor(opts) {
-		super({ ...opts, mode: 'mutation' })
-	}
-
-	/**
-	 * @returns {ReturnType<PgSelectStep['execute']>}
-	 * 	Explicitly typed to avoid private type usage
-	 */
-	execute(...args) {
-		if(!this.#modificationType) {
-			return super.execute(...args)
-		}
-
-		const ogExecuteWithout = this.resource['executeWithoutCache']
-		this.resource['executeWithoutCache'] = (ctx, args) => {
-			args.text = args.text.trim()
-			if(args.text.endsWith(';')) {
-				args.text = args.text.slice(0, -1)
-			}
-
-			args.text = this.#buildModifiedSql(args.text, args.rawSqlValues)
-
-			return ogExecuteWithout.call(this.resource, ctx, args).finally(() => (
-				this.resource['executeWithoutCache'] = ogExecuteWithout
-			))
-		}
-
-		return super.execute(...args)
+		super({
+			...opts,
+			resource: new CustomisablePgResource(opts.resource, this.#buildModifiedSql.bind(this)),
+			mode: 'mutation'
+		})
 	}
 
 	/**
@@ -125,7 +103,7 @@ export class PgSelectAndModify extends PgSelectStep {
 		${finalSelect}
 		`
 
-		return txt
+		return { text: txt, params }
 	}
 
 	delete() {
@@ -151,5 +129,50 @@ export class PgSelectAndModify extends PgSelectStep {
 	set(name, value) {
 		this.update()
 		this.#attrsToSet[name] = value
+	}
+}
+
+class CustomisablePgResource extends PgResource {
+
+	/**
+	 * @param {PgResource} resource
+	 * @param {(text: string, params: any[]) => ({ text: string, params: any[] })} modifySql
+	 */
+	constructor(resource, modifySql) {
+		super(
+			resource.registry,
+			{
+				'codec': resource.codec,
+				executor: resource.executor,
+				name: resource.name,
+				identifier: resource.identifier,
+				from: resource.from,
+				uniques: resource.uniques,
+				extensions: resource.extensions,
+				parameters: resource.parameters,
+				description: resource.description,
+				isUnique: resource.isUnique,
+				sqlPartitionByIndex: resource.sqlPartitionByIndex,
+				isMutation: resource.isMutation,
+				hasImplicitOrder: resource.hasImplicitOrder,
+				isList: resource.isList,
+				isVirtual: resource.isVirtual,
+			}
+		)
+
+		this.modifySql = modifySql
+	}
+
+	execute(ctx, args) {
+		args.text = args.text.trim()
+		if(args.text.endsWith(';')) {
+			args.text = args.text.slice(0, -1)
+		}
+
+		const { text, params } = this.modifySql(args.text, args.rawSqlValues)
+		args.text = text
+		args.rawSqlValues = params
+
+		return super.executeWithoutCache(ctx, args)
 	}
 }

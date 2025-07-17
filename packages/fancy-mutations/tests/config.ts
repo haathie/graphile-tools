@@ -18,10 +18,9 @@ export const CONFIG: TestGraphileConfig = {
 			name TEXT NOT NULL,
 			bio "fancy_mutations_test"."bio_data",
 			metadata JSONB,
-			nickname TEXT
+			nickname TEXT,
+			UNIQUE(name)
     );
-		CREATE UNIQUE INDEX IF NOT EXISTS "authors_name_idx"
-			ON "fancy_mutations_test"."authors"(name);
 
 		CREATE TABLE IF NOT EXISTS "fancy_mutations_test"."publishers" (
 			id SERIAL PRIMARY KEY,
@@ -36,7 +35,16 @@ export const CONFIG: TestGraphileConfig = {
 			author_id INT REFERENCES "fancy_mutations_test"."authors"(id) ON DELETE CASCADE,
 			publisher_id INT REFERENCES "fancy_mutations_test"."publishers"(id) ON DELETE SET NULL,
 			metadata JSONB
-    );`,
+    );
+		CREATE INDEX ON "fancy_mutations_test"."books"(author_id);
+		CREATE INDEX ON "fancy_mutations_test"."books"(publisher_id);
+		
+		comment on constraint books_author_id_fkey on fancy_mutations_test.books is $$
+		@behaviour +single
+		$$;
+		comment on constraint books_publisher_id_fkey on fancy_mutations_test.books is $$
+		@behaviour +single
+		$$;`,
 	preset: {
 		extends: [PostGraphileAmberPreset],
 		plugins: [FancyMutationsPlugin],

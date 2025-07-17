@@ -109,7 +109,11 @@ function getOutputItems(
 	resource: PgTableResource,
 	build: GraphileBuild.Build,
 ): GraphQLFieldConfig<unknown, unknown> {
-	const outputObj = build.getGraphQLTypeByPgCodec(
+	const {
+		getGraphQLTypeByPgCodec,
+		graphql: { GraphQLList, GraphQLNonNull }
+	} = build
+	const outputObj = getGraphQLTypeByPgCodec(
 		resource.codec, 'output'
 	) as GraphQLObjectType
 	if(!outputObj) {
@@ -117,7 +121,7 @@ function getOutputItems(
 	}
 
 	return {
-		type: new build.graphql.GraphQLList(outputObj),
+		type: new GraphQLNonNull(new GraphQLList(new GraphQLNonNull(outputObj))),
 		extensions: { grafast: { plan: createSelectAffectedRowsPlan(build) } }
 	}
 }

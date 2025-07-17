@@ -2,7 +2,8 @@ import { getRelationFieldName } from '@haathie/postgraphile-common-utils'
 import * as debug from 'debug'
 import type { PgCodecAttribute, PgResource } from 'postgraphile/@dataplan/pg'
 import type { GraphQLInputFieldConfig, GraphQLInputObjectType, GraphQLInputType } from 'postgraphile/graphql'
-import type { PGEntityCtx } from './pg-utils.ts'
+import { sql } from 'postgraphile/pg-sql2'
+import type { PGEntityColumn, PGEntityCtx } from './pg-utils.ts'
 import type { PgRowBuilder } from './PgCreateStep.ts'
 import type { PgTableResource } from './types.ts'
 
@@ -188,7 +189,9 @@ function getForwardRelationAttrs(
 	return attrs
 }
 
-export function getEntityCtx<T>(table: PgTableResource): PGEntityCtx<T> {
+export function getEntityCtx(
+	table: PgTableResource
+): PGEntityCtx<{ [_: string]: unknown }> {
 	const { identifier, executor, codec } = table
 	// table ID is the executor name + '.' + table name
 	// so we remove the executor name from the identifier
@@ -196,7 +199,7 @@ export function getEntityCtx<T>(table: PgTableResource): PGEntityCtx<T> {
 	// e.g. 'main.public.users' -> 'public.users'
 	const fqTableName = identifier.slice(executor.name.length + 1)
 
-	const propToColumnMap: Record<string, string> = {}
+	const propToColumnMap: Record<string, PGEntityColumn> = {}
 	const primaryKeyNames: string[] = []
 	const primaryKey = table.uniques.find(u => u.isPrimary)
 	if(!primaryKey) {
@@ -204,10 +207,14 @@ export function getEntityCtx<T>(table: PgTableResource): PGEntityCtx<T> {
 	}
 
 	const otherUniqueNames = table.uniques.map(u => {
-		return { columns: [...u.attributes] as Array<keyof T> }
+		return { columns: [...u.attributes] as string[] }
 	})
 	for(const attributeName in codec.attributes) {
-		propToColumnMap[attributeName] = attributeName
+		const sqlType = codec.attributes[attributeName].codec.sqlType
+		propToColumnMap[attributeName] = {
+			name: attributeName,
+			sqlType: sql.compile(sqlType).text
+		}
 		if(primaryKey.attributes.includes(attributeName)) {
 			primaryKeyNames.push(attributeName)
 		}
@@ -215,9 +222,9 @@ export function getEntityCtx<T>(table: PgTableResource): PGEntityCtx<T> {
 
 	return {
 		tableName: fqTableName,
-		idProperties: primaryKeyNames as Array<keyof T>,
+		idProperties: primaryKeyNames,
 		uniques: otherUniqueNames,
-		propertyColumnMap: propToColumnMap as Record<keyof T, string>,
+		propertyColumnMap: propToColumnMap,
 	}
 }
 

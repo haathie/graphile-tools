@@ -26,6 +26,44 @@ describe('Fancy Mutations', () => {
 	})
 
 	it('should bulk create authors with books', async() => {
-
+		const mutQl = `mutation CreateAuthors($input: [AuthorsCreateItem!]!) {
+			createAuthors(items: $input, onConflict: DoNothing) {
+				items {
+					rowId
+					name
+					booksByAuthorId {
+						nodes {
+							rowId
+							title
+						}
+					}
+				}
+			}
+		}`
+		const data = await srv.graphqlRequest({
+			query: mutQl,
+			variables: {
+				input: [
+					{
+						name: 'Author 1',
+						booksByAuthorId: [
+							{ title: 'Book 1' },
+							{ title: 'Book 2' }
+						]
+					},
+					{
+						name: 'Author 2',
+						booksByAuthorId: [
+							{
+								title: 'Book 3',
+								publisherByPublisherId: { name: 'Publisher 1' }
+							},
+							{ title: 'Book 4' }
+						]
+					}
+				]
+			}
+		})
+		console.log(JSON.stringify(data, null, 2))
 	})
 })

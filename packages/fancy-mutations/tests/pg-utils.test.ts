@@ -19,11 +19,11 @@ type Author = {
 const AUTHOR_CTX: PGEntityCtx<Partial<Author>> = {
 	'idProperties': ['id'],
 	'propertyColumnMap': {
-		'id': 'id',
-		'name': 'name',
-		'bio': 'bio',
-		'metadata': 'metadata',
-		'nickname': 'nickname',
+		'id': { sqlType: 'varchar' },
+		'name': { sqlType: 'varchar' },
+		'bio': { sqlType: 'fancy_mutations_test.bio_data' },
+		'metadata': { sqlType: 'jsonb' },
+		'nickname': { sqlType: 'varchar' }
 	},
 	'uniques': [{ columns: ['id'] }, { columns: ['name'] }],
 	'tableName': 'fancy_mutations_test.authors',
