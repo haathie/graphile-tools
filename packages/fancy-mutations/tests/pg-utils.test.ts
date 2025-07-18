@@ -21,7 +21,12 @@ const AUTHOR_CTX: PGEntityCtx<Partial<Author>> = {
 	'propertyColumnMap': {
 		'id': { sqlType: 'varchar' },
 		'name': { sqlType: 'varchar' },
-		'bio': { sqlType: 'fancy_mutations_test.bio_data' },
+		'bio': {
+			sqlType: 'fancy_mutations_test.bio_data',
+			convertToPg({ age, favourite_genre: g }) {
+				return `(${age},${g})`
+			}
+		},
 		'metadata': { sqlType: 'jsonb' },
 		'nickname': { sqlType: 'varchar' }
 	},
@@ -42,6 +47,23 @@ describe('PG Utils', () => {
 		await pool.end()
 	})
 
+	// it.only('should bench', async() => {
+	// 	const iters = 10_000
+	// 	await Promise.all(Array.from({ length: iters }, async() => {
+	// 		await tx(client => (
+	// 			insertData(
+	// 				Array.from({ length: 5 }, (): Partial<Author> => ({
+	// 					name: `Author ${Math.random()}`
+	// 				})),
+	// 				client,
+	// 				{ type: 'ignore' },
+	// 				['id', 'name'],
+	// 				AUTHOR_CTX
+	// 			)
+	// 		))
+	// 	}))
+	// })
+
 	describe('On Conflict = Ignore', () => {
 		it('should insert or do nothing', async() => {
 			const authors: Partial<Author>[] = [
@@ -50,7 +72,7 @@ describe('PG Utils', () => {
 				},
 				{
 					name: 'Author 2',
-					// bio: { age: 30, 'favourite_genre': 5 },
+					bio: { age: 30, 'favourite_genre': 5 },
 				},
 				{
 					name: 'Author 3',

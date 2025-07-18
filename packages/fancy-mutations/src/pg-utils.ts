@@ -1,14 +1,15 @@
 // contains general utils for PG, is not tied to
 // Graphile
 
-export type PGEntityColumn = {
+export type PGEntityColumn<T> = {
 	name?: string
 	sqlType: string
+	convertToPg?: (value: Exclude<T, null | undefined>) => string
 }
 
 export type PGEntityCtx<T> = {
 	tableName: string
-	propertyColumnMap: { [k in keyof T]: PGEntityColumn }
+	propertyColumnMap: { [k in keyof T]: PGEntityColumn<T[k]> }
 	idProperties: (keyof T)[]
 	uniques: { columns: (keyof T)[] }[]
 }
@@ -69,6 +70,11 @@ export async function insertData<T>(
 	returningColumns: (keyof T)[] | undefined,
 	ctx: PGEntityCtx<T>,
 ) {
+	if(!ctx.uniques.length || onConflict?.type === undefined) {
+		// no unique constraints, so we can do a simple insert
+		return _insertDataSimple(entities, client, returningColumns, ctx)
+	}
+
 	// simple insert if there are no conflict handling options
 	switch (onConflict?.type) {
 	// when replacing, we want to be careful to only replace the columns
@@ -87,9 +93,9 @@ export async function insertData<T>(
 		return sortAndMergeResultsByBuckets(buckets, entities, rslts)
 	case 'update':
 	case 'ignore':
-		return _deDuplicatedMerge(entities, client, returningColumns, onConflict, ctx)
-	case undefined:
-		return _insertDataSimple(entities, client, returningColumns, ctx)
+		return _deDuplicatedMerge(
+			entities, client, returningColumns, onConflict, ctx
+		)
 	default:
 		throw new Error(`Unknown conflict handling type: ${onConflict}`)
 	}
@@ -144,11 +150,12 @@ async function _deDuplicatedMerge<T>(
 	data: T[],
 	client: SimplePgClient,
 	returningColumns: (keyof T)[] | undefined,
-	onConflict: { type: 'ignore' | 'replace' }
-		| { type: 'update', properties: (keyof T)[] },
+	onConflict: ConflictHandlingOpts<T>,
 	ctx: PGEntityCtx<T>,
 ): Promise<InsertQueryResult> {
 	const { tableName } = ctx
+
+	const tmpTableName = getTmpTableName(tableName)
 	const propsToInsert = getUsedProperties(data, ctx)
 	const columnsToInsertStr = propsToInsert
 		.map(c => `"${getColumnName(c, ctx)}"`)
@@ -163,13 +170,12 @@ async function _deDuplicatedMerge<T>(
 		?.map(c => `"${getColumnName(c, ctx)}" = i."${getColumnName(c, ctx)}"`)
 		.join(',')
 	const whenMatchedClause = updateStr
-		? `WHEN MATCHED THEN
-			UPDATE SET ${updateStr}`
+		? `WHEN MATCHED THEN UPDATE SET ${updateStr}`
 		: undefined
 
 	const {
 		sql: dedupeSql, dupMatchClause
-	} = getDeDuplicatedRowBuilder(propsToInsert, ctx)
+	} = getDeDuplicatedRowBuilder(propsToInsert, tmpTableName, ctx)
 
 	// we'll match all possible unique constraints
 	// and get the "returning" columns of the existing entities
@@ -221,15 +227,17 @@ async function _deDuplicatedMerge<T>(
 			+ ', (SELECT COUNT(*) FROM inserted_rows) AS "inserted_count"'
 	}
 
+	await client.query(
+		`CREATE TEMP TABLE IF NOT EXISTS ${getTmpTableName(tableName)}
+		(LIKE ${tableName} INCLUDING DEFAULTS);`
+	)
+
 	const rslt = await executePgParameteredQuery<T, InsertRow>(
 		data,
 		propsToInsert,
 		ctx,
 		valuePlaceholders => {
 			const placeholders = valuePlaceholders.map(p => `(${p.join(',')})`)
-			console.log(
-				query.replace('???', placeholders.join(','))
-			)
 			return query.replace('???', placeholders.join(','))
 		},
 		client
@@ -240,8 +248,7 @@ async function _deDuplicatedMerge<T>(
 			rowCount: rslt.rowCount,
 			affectedCount: rslt.rows
 				.filter(r => (
-					r['row_action'] === 'INSERT'
-					|| r['row_action'] === 'UPDATE'
+					r['row_action'] === 'INSERT' || r['row_action'] === 'UPDATE'
 				)).length,
 			rows: rslt.rows
 		}
@@ -258,38 +265,35 @@ async function _deDuplicatedMerge<T>(
 
 function getDeDuplicatedRowBuilder<T>(
 	propsBeingInserted: (keyof T)[],
+	tmpTableName: string,
 	ctx: PGEntityCtx<T>
 ) {
 	const columnsToInsertStr = propsBeingInserted
 		.map(c => `"${getColumnName(c, ctx)}"`)
 		.join(',')
-	const dupMatches: string[] = []
-	for(const { columns } of ctx.uniques) {
-		const relevantProps = columns
-			.filter(c => propsBeingInserted.includes(c))
-		// if no properties are being inserted that match the unique constraint,
-		// we can skip this unique constraint
-		if(!relevantProps.length) {
-			continue
-		}
-
-		const uqPropsStr = relevantProps
+	const dupMatchClause = ctx.uniques.map(({ columns }) => {
+		const uqPropsStr = columns
 			.map(p => `i."${getColumnName(p, ctx)}" = t."${getColumnName(p, ctx)}"`)
 			.join(' AND ')
-		dupMatches.push(`(${uqPropsStr})`)
-	}
+		return `(${uqPropsStr})`
+	})
+		.join(' OR ')
 
-	const dupMatchClause = dupMatches.length
-		? dupMatches.join(' OR ')
-		: undefined
 	const dupMatchesStr = dupMatchClause
 		? `(select array_agg(rn) from rows_to_insert_rn t where ${dupMatchClause}) as dups`
 		: 'ARRAY[rn] as dups'
 
 	return {
-		sql: `WITH rows_to_insert_rn AS (
-			SELECT *, row_number() over () as rn
-			FROM (VALUES ???) AS t(${columnsToInsertStr})
+		sql: `WITH rows_to_insert AS (
+			INSERT INTO ${tmpTableName} (${columnsToInsertStr})
+			VALUES ??? -- will be replaced with the values
+			RETURNING *
+		),
+		deld AS (
+			DELETE FROM ${tmpTableName}
+		),
+		rows_to_insert_rn AS (
+			SELECT *, row_number() over () as rn FROM rows_to_insert
 		),
 		rows_to_insert_dups AS (
 			SELECT *, ${dupMatchesStr} FROM rows_to_insert_rn i
@@ -412,18 +416,23 @@ function buildPgParameteredQuery<T>(
 		}
 
 		const placeholders = propertiesToExtract.map(prop => {
-			const value = mapValueForPg(row[prop])
-			if(value === null) {
+			const jsValue = row[prop]
+			if(jsValue === null) {
 				return 'NULL'
 			}
 
-			if(value === undefined) {
+			if(jsValue === undefined) {
 				return 'DEFAULT'
 			}
 
+			const { sqlType, convertToPg } = propertyColumnMap[prop]
+			const value = convertToPg
+				// @ts-expect-error
+				? convertToPg(jsValue)
+				: mapValueForPg(jsValue)
+
 			values.push(value)
-			const type = propertyColumnMap[prop].sqlType
-			return `$${values.length}::${type}`
+			return `$${values.length}::${sqlType}`
 		})
 		valuePlaceholders.push(placeholders)
 	}
@@ -483,4 +492,10 @@ function mapValueForCopy(value: unknown) {
 function getColumnName<T>(prop: keyof T, ctx: PGEntityCtx<T>) {
 	const column = ctx.propertyColumnMap[prop]
 	return column.name || String(prop)
+}
+
+function getTmpTableName(tableName: string) {
+	// Create an acceptable temporary table name
+	// (i.e. remove quotes, special characters, etc.)
+	return tableName.replace(/[^a-zA-Z0-9_]/g, '_').toLowerCase() + '_tmp'
 }

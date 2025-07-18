@@ -199,7 +199,7 @@ export function getEntityCtx(
 	// e.g. 'main.public.users' -> 'public.users'
 	const fqTableName = identifier.slice(executor.name.length + 1)
 
-	const propToColumnMap: Record<string, PGEntityColumn> = {}
+	const propToColumnMap: Record<string, PGEntityColumn<unknown>> = {}
 	const primaryKeyNames: string[] = []
 	const primaryKey = table.uniques.find(u => u.isPrimary)
 	if(!primaryKey) {
@@ -209,11 +209,12 @@ export function getEntityCtx(
 	const otherUniqueNames = table.uniques.map(u => {
 		return { columns: [...u.attributes] as string[] }
 	})
-	for(const attributeName in codec.attributes) {
-		const sqlType = codec.attributes[attributeName].codec.sqlType
+	for(const
+		[attributeName, { codec: attrCodec }] of Object.entries(codec.attributes)) {
 		propToColumnMap[attributeName] = {
 			name: attributeName,
-			sqlType: sql.compile(sqlType).text
+			sqlType: sql.compile(attrCodec.sqlType).text,
+			convertToPg: v => attrCodec.toPg(v)!.toString()
 		}
 		if(primaryKey.attributes.includes(attributeName)) {
 			primaryKeyNames.push(attributeName)

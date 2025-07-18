@@ -3,6 +3,25 @@ import assert from 'node:assert'
 import { after, before, describe, it } from 'node:test'
 import { CONFIG } from './config.ts'
 
+type SimpleMutationResult = {
+	createAuthors: {
+		items: {
+			rowId: number
+			name: string
+			booksByAuthorId: {
+				nodes: {
+					rowId: number
+					title: string
+					publisherByPublisherId: {
+						rowId: number
+						name: string
+					} | null
+				}[]
+			}
+		}[]
+	}
+}
+
 describe('Fancy Mutations', () => {
 
 	let srv: BootedGraphileServer
@@ -34,13 +53,19 @@ describe('Fancy Mutations', () => {
 					booksByAuthorId {
 						nodes {
 							rowId
-							title
+							title,
+							publisherByPublisherId {
+								rowId
+								name
+							}
 						}
 					}
 				}
 			}
 		}`
-		const data = await srv.graphqlRequest({
+		const {
+			createAuthors: { items }
+		} = await srv.graphqlRequest<SimpleMutationResult>({
 			query: mutQl,
 			variables: {
 				input: [
@@ -64,6 +89,45 @@ describe('Fancy Mutations', () => {
 				]
 			}
 		})
-		console.log(JSON.stringify(data, null, 2))
+
+		assert.ok(items[0].rowId)
+		assert.ok(items[1].booksByAuthorId.nodes[0].rowId)
+		assert.partialDeepStrictEqual(
+			items,
+			[
+				{
+					'name': 'Author 1',
+					'booksByAuthorId': {
+						'nodes': [
+							{
+								'title': 'Book 1',
+								'publisherByPublisherId': null
+							},
+							{
+								'title': 'Book 2',
+								'publisherByPublisherId': null
+							}
+						]
+					}
+				},
+				{
+					'name': 'Author 2',
+					'booksByAuthorId': {
+						'nodes': [
+							{
+								'title': 'Book 3',
+								'publisherByPublisherId': {
+									'name': 'Publisher 1'
+								}
+							},
+							{
+								'title': 'Book 4',
+								'publisherByPublisherId': null
+							}
+						]
+					}
+				}
+			]
+		)
 	})
 })

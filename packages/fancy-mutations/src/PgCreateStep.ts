@@ -3,7 +3,7 @@ import { context, type ExecutionDetails, type ExecutionResults, type Maybe, Modi
 import { GraphQLError } from 'postgraphile/graphql'
 import { insertData, type PGEntityCtx } from './pg-utils.ts'
 import type { OnConflictOption, PgTableResource } from './types.ts'
-import { getEntityCtx } from './utils.ts'
+import { DEBUG, getEntityCtx } from './utils.ts'
 
 type PgCreateCallback = (pgCreate: PgCreateStep) => void
 
@@ -26,6 +26,7 @@ export class PgCreateStep extends Step<{ items: PlainObject[] }> {
 	readonly #entityCtxCache: { [rscName: string]: PGEntityCtx<unknown> } = {}
 	pendingRowMap: { [rscName: string]: PgRowBuilder[] } = {}
 	selectPrimaryColumns = false
+	#rowsAdded = 0
 
 	constructor(
 		resource: PgTableResource,
@@ -55,6 +56,7 @@ export class PgCreateStep extends Step<{ items: PlainObject[] }> {
 
 		return indexMap(async i => {
 			this.pendingRowMap = {}
+			this.#rowsAdded = 0
 
 			for(const applyDepId of this.#argsDepIds) {
 				const callback = values[applyDepId].at(i)
@@ -65,20 +67,22 @@ export class PgCreateStep extends Step<{ items: PlainObject[] }> {
 				} else if(callback !== null) {
 					callback(this)
 				}
-
-				console.log('applyDepId', applyDepId, 'callback', callback)
 			}
 
-			const rootMutsLength = Object.keys(this.pendingRowMap).length
-			if(!rootMutsLength) {
+			if(!this.#rowsAdded) {
 				throw new GraphQLError('Must have at least 1 mutation')
 			}
 
-			if(rootMutsLength > MAX_BULK_MUTATION_LENGTH) {
+			if(this.#rowsAdded > MAX_BULK_MUTATION_LENGTH) {
 				throw new GraphQLError(
-					`Must have at most ${MAX_BULK_MUTATION_LENGTH} mutations`
+					`Total mutations (${this.#rowsAdded}) exceed ${MAX_BULK_MUTATION_LENGTH}`
 				)
 			}
+
+			DEBUG(
+				`Executing create step for ${this.resource.name}, `
+				+ `with ${this.#rowsAdded} total rows, mode = ${onConflict}`
+			)
 
 			const resolvedRowMap = await withPgClient(pgSettings, async pgClient => {
 				await pgClient.query({ text: 'BEGIN' })
@@ -99,16 +103,24 @@ export class PgCreateStep extends Step<{ items: PlainObject[] }> {
 		})
 	}
 
-	addRowBuilder(): PgRowBuilder {
-		return new PgRowBuilder(this)
+	addRowBuilder(resource: PgTableResource = this.resource): PgRowBuilder {
+		return new PgRowBuilder(this, resource, this.#rowsAdded++)
 	}
 
 	async #execute(client: NodePostgresPgClient, onConflict: OnConflictOption) {
 		const resolvedRowMap: { [rscName: string]: PgRowBuilder[] } = {}
 
+		let layers = 0
 		let builders: { [rscName: string]: PgRowBuilder[] } | undefined
 		while(builders = this.#getDependencyFreeRowBuilders()) {
-			for(const [rscName, pendingRows] of Object.entries(builders)) {
+			const depFreeBuilders = Object.entries(builders)
+			DEBUG(
+				`Executing create step (layer ${layers++})`
+				+ ` with ${depFreeBuilders.length} dependency-free builders: `
+				+ depFreeBuilders.map(t => t[0]).join(', ')
+			)
+
+			for(const [rscName, pendingRows] of depFreeBuilders) {
 				const rsc = this.resource.registry
 					.pgResources[rscName] as PgTableResource
 				const ctx = this.#entityCtxCache[rscName] || getEntityCtx(rsc)
@@ -139,12 +151,18 @@ export class PgCreateStep extends Step<{ items: PlainObject[] }> {
 				const {
 					rows,
 					rowCount,
+					affectedCount
 				} = await insertData<{ [_: string]: unknown }>(
 					values,
 					client.rawClient,
 					_onConflict === 'error' ? undefined : { type: _onConflict },
 					Array.from(colsToReturn),
 					ctx
+				)
+
+				DEBUG(
+					`Inserted ${rowCount} rows into ${rsc.name}, `
+					+ `affected ${affectedCount} rows`
 				)
 
 				if(rowCount !== values.length) {
@@ -206,18 +224,24 @@ export class PgRowBuilder extends Modifier<PgCreateStep> {
 	readonly #values: Record<string, RowValue<unknown>> = {}
 	readonly #dependents: Record<string, { rbKey: string, rb: PgRowBuilder }[]> = {}
 	readonly #dependencies = new Set<string>()
+	readonly rowIndex: number
 
 	constructor(
 		parent: PgCreateStep,
-		resource: PgTableResource = parent.resource
+		resource: PgTableResource,
+		rowIndex: number
 	) {
 		super(parent)
 		this.resource = resource
+		this.rowIndex = rowIndex
 	}
 
 	apply(): void {
-		this.parent.pendingRowMap[this.resource.name] ||= []
-		this.parent.pendingRowMap[this.resource.name].push(this)
+		const rows = (this.parent.pendingRowMap[this.resource.name] ||= [])
+		// apply is done in the opposite order of creation
+		// so we add the new row builder at the start -- to maintain the order
+		// of the rows
+		rows.unshift(this)
 	}
 
 	set(key: string, value: unknown): void {
@@ -236,10 +260,7 @@ export class PgRowBuilder extends Modifier<PgCreateStep> {
 			)
 		}
 
-		const rb = new PgRowBuilder(
-			this.parent,
-			rel.remoteResource as PgTableResource
-		)
+		const rb = this.parent.addRowBuilder(rel.remoteResource as PgTableResource)
 
 		// this is the source of the relation
 		if(rel.isReferencee) {
