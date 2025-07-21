@@ -1,9 +1,9 @@
-import { type BootedGraphileServer, runDdlAndBoot } from '@haathie/postgraphile-common-utils/tests'
+import { type BootedGraphileServer, getSuperuserPool, runDdlAndBoot } from '@haathie/postgraphile-common-utils/tests'
 import assert from 'node:assert'
 import { after, before, describe, it } from 'node:test'
 import { CONFIG } from './config.ts'
 
-type SimpleMutationResult = {
+type SimpleUpsertResult = {
 	createAuthors: {
 		items: {
 			rowId: number
@@ -21,6 +21,32 @@ type SimpleMutationResult = {
 		}[]
 	}
 }
+
+const UPSERT_QL = `mutation CreateAuthors(
+	$input: [AuthorsCreateItem!]!,
+	$onConflict: OnConflictOptions!
+) {
+	createAuthors(items: $input, onConflict: $onConflict) {
+		items {
+			rowId
+			name
+			bio {
+				age
+				favouriteGenre
+			}
+			booksByAuthorId {
+				nodes {
+					rowId
+					title,
+					publisherByPublisherId {
+						rowId
+						name
+					}
+				}
+			}
+		}
+	}
+}`
 
 describe('Fancy Mutations', () => {
 
@@ -44,50 +70,31 @@ describe('Fancy Mutations', () => {
 		assert.ok(mutationFields.deleteAuthors)
 	})
 
-	it('should bulk create authors with books', async() => {
-		const mutQl = `mutation CreateAuthors($input: [AuthorsCreateItem!]!) {
-			createAuthors(items: $input, onConflict: DoNothing) {
-				items {
-					rowId
-					name
-					booksByAuthorId {
-						nodes {
-							rowId
-							title,
-							publisherByPublisherId {
-								rowId
-								name
-							}
-						}
-					}
-				}
-			}
-		}`
-		const {
-			createAuthors: { items }
-		} = await srv.graphqlRequest<SimpleMutationResult>({
-			query: mutQl,
-			variables: {
-				input: [
+	it('should bulk create authors with books, onConflict: DoNothing', async() => {
+		const input = [
+			{
+				name: 'Author 1',
+				booksByAuthorId: [
+					{ title: 'Book 1' },
+					{ title: 'Book 2' }
+				]
+			},
+			{
+				name: 'Author 2',
+				booksByAuthorId: [
 					{
-						name: 'Author 1',
-						booksByAuthorId: [
-							{ title: 'Book 1' },
-							{ title: 'Book 2' }
-						]
+						title: 'Book 3',
+						publisherByPublisherId: { name: 'Publisher 1' }
 					},
-					{
-						name: 'Author 2',
-						booksByAuthorId: [
-							{
-								title: 'Book 3',
-								publisherByPublisherId: { name: 'Publisher 1' }
-							},
-							{ title: 'Book 4' }
-						]
-					}
+					{ title: 'Book 4' }
 				]
 			}
+		]
+		const {
+			createAuthors: { items }
+		} = await srv.graphqlRequest<SimpleUpsertResult>({
+			query: UPSERT_QL,
+			variables: { onConflict: 'DoNothing', input }
 		})
 
 		assert.ok(items[0].rowId)
@@ -129,5 +136,242 @@ describe('Fancy Mutations', () => {
 				}
 			]
 		)
+
+		// ensure the author isn't created again
+		// as it has a constraint on the name
+		const {
+			createAuthors: { items: items2 }
+		} = await srv.graphqlRequest<SimpleUpsertResult>({
+			query: UPSERT_QL,
+			variables: { onConflict: 'DoNothing', input }
+		})
+		assert.strictEqual(items2.length, items.length)
+		assert.strictEqual(items[0].rowId, items2[0].rowId)
+	})
+
+	it('should bulk create authors with onConflict: Error', async() => {
+		const input = [
+			{
+				name: 'Author 3',
+				booksByAuthorId: [
+					{
+						title: 'Book 10',
+						'publisherByPublisherId': {
+							'name': 'Publisher 3'
+						}
+					},
+					{ title: 'Book 11' }
+				]
+			},
+		]
+
+		const {
+			createAuthors: { items }
+		} = await srv.graphqlRequest<SimpleUpsertResult>({
+			query: UPSERT_QL,
+			variables: {
+				onConflict: 'Error',
+				input: input
+			}
+		})
+		assert.strictEqual(items.length, 1)
+
+		const pool = getSuperuserPool(CONFIG.preset)
+		const { rows: existingPubs } = await pool.query(
+			'SELECT * FROM fancy_mutations_test.publishers',
+		)
+
+		await assert.rejects(() => (
+			srv.graphqlRequest<SimpleUpsertResult>({
+				query: UPSERT_QL,
+				variables: { onConflict: 'Error', input }
+			})
+		))
+
+		// ensure that if one of the rows fails,
+		// the entire mutation fails and no rows are created
+		const { rows: newPubs } = await pool.query(
+			'SELECT * FROM fancy_mutations_test.publishers'
+		)
+		assert.strictEqual(existingPubs.length, newPubs.length)
+	})
+
+	it('should bulk create authors with onConflict: Replace', async() => {
+		const {
+			createAuthors: { items: initialItems }
+		} = await srv.graphqlRequest<SimpleUpsertResult>({
+			query: UPSERT_QL,
+			variables: {
+				onConflict: 'Replace',
+				input: [
+					{
+						name: 'Author 4',
+						bio: { age: 40, 'favouriteGenre': 'something' },
+						booksByAuthorId: [
+							{ title: 'Book 5' },
+						]
+					},
+				]
+			}
+		})
+
+		const {
+			createAuthors: { items: updatedItems }
+		} = await srv.graphqlRequest<SimpleUpsertResult>({
+			query: UPSERT_QL,
+			variables: {
+				onConflict: 'Replace',
+				input: [
+					{
+						name: 'Author 4',
+						bio: { age: 41, 'favouriteGenre': 'something' },
+						booksByAuthorId: [
+							{ title: 'Book 5' },
+						]
+					},
+				]
+			}
+		})
+
+		assert.strictEqual(initialItems.length, updatedItems.length)
+		assert.strictEqual(initialItems[0].rowId, updatedItems[0].rowId)
+		assert.partialDeepStrictEqual(
+			updatedItems,
+			[
+				{
+					'name': 'Author 4',
+					'bio': { 'age': 41, 'favouriteGenre': 'something' },
+					'booksByAuthorId': {
+						'nodes': [
+							{
+								'title': 'Book 5',
+								'publisherByPublisherId': null
+							},
+							{
+								'title': 'Book 5',
+								'publisherByPublisherId': null
+							}
+						]
+					}
+				}
+			]
+		)
+	})
+
+	it('should update authors by query', async() => {
+		const {
+			createAuthors: { items: [{ rowId }] }
+		} = await srv.graphqlRequest<SimpleUpsertResult>({
+			query: UPSERT_QL,
+			variables: {
+				onConflict: 'Error',
+				input: [
+					{ name: 'Author 5' },
+					{ name: 'Author 6' }
+				]
+			}
+		})
+
+		const { updateAuthors: { items } } = await srv.graphqlRequest<any>({
+			query: `mutation UpdateAuthors($condition: AuthorCondition!, $patch: AuthorPatch!) {
+				updateAuthors(condition: $condition, patch: $patch) {
+					affected
+					items {
+						rowId
+						name
+						bio {
+							age
+							favouriteGenre
+						}
+					}
+				}
+			}`,
+			variables: {
+				condition: { rowId: rowId },
+				patch: {
+					name: 'Author 5 Updated',
+					bio: { age: 35, favouriteGenre: 'Sci-Fi' },
+				}
+			}
+		})
+
+		assert.partialDeepStrictEqual(
+			items,
+			[
+				{
+					'rowId': rowId,
+					'name': 'Author 5 Updated',
+					'bio': { 'age': 35, 'favouriteGenre': 'Sci-Fi' }
+				}
+			]
+		)
+
+		// check if affected count is correct
+		const { updateAuthors: { affected } } = await srv.graphqlRequest<any>({
+			query: `mutation UpdateAuthors($condition: AuthorCondition!, $patch: AuthorPatch!) {
+				updateAuthors(condition: $condition, patch: $patch) {
+					affected
+				}
+			}`,
+			variables: {
+				condition: { rowId: rowId },
+				patch: {
+					name: 'Author 5 Updated Again',
+				}
+			}
+		})
+		assert.strictEqual(affected, 1)
+
+		// ensure the other author is not affected
+		const pool = getSuperuserPool(CONFIG.preset)
+		const { rows: authors } = await pool.query(
+			'SELECT * FROM fancy_mutations_test.authors WHERE name = $1',
+			['Author 6']
+		)
+		assert.partialDeepStrictEqual(
+			authors,
+			[
+				{
+					'name': 'Author 6',
+					'bio': null
+				}
+			]
+		)
+	})
+
+	it('should delete authors by query', async() => {
+		const {
+			createAuthors: { items: [{ rowId }] }
+		} = await srv.graphqlRequest<SimpleUpsertResult>({
+			query: UPSERT_QL,
+			variables: {
+				onConflict: 'Error',
+				input: [
+					{ name: 'Author 7' },
+					{ name: 'Author 8' },
+				]
+			}
+		})
+
+		const { deleteAuthors: { affected } } = await srv.graphqlRequest<any>({
+			query: `mutation DeleteAuthors($condition: AuthorCondition!) {
+				deleteAuthors(condition: $condition) {
+					affected
+				}
+			}`,
+			variables: {
+				condition: { rowId: rowId }
+			}
+		})
+
+		assert.strictEqual(affected, 1)
+
+		// ensure the other author is not affected
+		const pool = getSuperuserPool(CONFIG.preset)
+		const { rows: authors } = await pool.query(
+			'SELECT name FROM fancy_mutations_test.authors WHERE name IN ($1, $2)',
+			['Author 7', 'Author 8']
+		)
+		assert.deepStrictEqual(authors, [{ name: 'Author 8' }])
 	})
 })

@@ -18,13 +18,18 @@ export class PgSelectAndModify extends PgSelectStep {
 	 * @type {Record<string, SQL>}
 	 */
 	#attrsToSet = {}
+
+	#primaryUqMatches = undefined
 	/**
 	 * @param {import('postgraphile/@dataplan/pg').PgSelectOptions} opts
 	 */
 	constructor(opts) {
 		super({
 			...opts,
-			resource: new CustomisablePgResource(opts.resource, this.#buildModifiedSql.bind(this)),
+			resource: new CustomisablePgResource(
+				opts.resource,
+				(...args) => this.#buildModifiedSql(...args)
+			),
 			mode: 'mutation'
 		})
 	}
@@ -46,18 +51,16 @@ export class PgSelectAndModify extends PgSelectStep {
 		if(this.#modificationType === 'delete') {
 			// ensure primary key attributes are selected -- as they'll be
 			// used to identify the rows to modify
-			const primaryUqIdxs = primaryUnique.attributes.map(attr => (
-				[
-					attr,
-					this.selectAndReturnIndex(
-						sql.join([this.alias, sql.identifier(attr)], '.')
-					)
-				]
-			))
-			const whereMatch = primaryUqIdxs.map(([attr, idx]) => (
+			if(!this.#primaryUqMatches) {
+				throw new Error(
+					`Cannot delete from ${this.resource.name} without a primary key`
+				)
+			}
+
+			const whereMatch = this.#primaryUqMatches.map(([attr, idx]) => (
 				`selections."${idx}" = t."${attr}"`
 			)).join(' AND ')
-			return `
+			const txt = `
 				WITH selections AS (${text}),
 				modifications AS (
 					DELETE FROM ${compiledFrom} AS t
@@ -66,12 +69,20 @@ export class PgSelectAndModify extends PgSelectStep {
 				)
 				SELECT * FROM selections
 				`
+			return { text: txt, params }
 		}
 
 		const attrsEntries = Object.entries(this.#attrsToSet)
 		const updates = attrsEntries
 			.map(([name, value]) => {
-				params.push(value)
+				const attr = this.resource.codec.attributes[name]
+				if(!attr) {
+					throw new Error(
+						`Attribute "${name}" not found in resource ${this.resource.name}`
+					)
+				}
+
+				params.push(attr.codec.toPg(value) || value)
 				return `"${name}" = $${params.length}`
 			})
 			.join(', ')
@@ -130,6 +141,29 @@ export class PgSelectAndModify extends PgSelectStep {
 		this.update()
 		this.#attrsToSet[name] = value
 	}
+
+	finalize() {
+		super.finalize()
+
+		if(this.#modificationType === 'delete') {
+			// select all primary key attributes
+			const primaryUnique = this.resource.uniques.find(u => u.isPrimary)
+			if(!primaryUnique) {
+				throw new Error(
+					`Cannot delete from ${this.resource.name} without a primary key`
+				)
+			}
+
+			this.#primaryUqMatches = primaryUnique.attributes.map(attr => (
+				[
+					attr,
+					this.selectAndReturnIndex(
+						sql.join([this.alias, sql.identifier(attr)], '.')
+					)
+				]
+			))
+		}
+	}
 }
 
 class CustomisablePgResource extends PgResource {
@@ -163,7 +197,7 @@ class CustomisablePgResource extends PgResource {
 		this.modifySql = modifySql
 	}
 
-	execute(ctx, args) {
+	executeWithoutCache(ctx, args) {
 		args.text = args.text.trim()
 		if(args.text.endsWith(';')) {
 			args.text = args.text.slice(0, -1)

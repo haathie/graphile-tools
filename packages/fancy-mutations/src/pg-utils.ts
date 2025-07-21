@@ -116,7 +116,7 @@ async function _insertDataSimple<T>(
 	const propsToInsert = getUsedProperties(data, ctx)
 	const columnsToInsertStr = propsToInsert
 		.map(c => `"${getColumnName(c, ctx)}"`)
-	const returningColumnsStr = returningColumns
+	const returningColumnsStr = returningColumns?.length
 		? `RETURNING ${returningColumns.map(c => `"${getColumnName(c, ctx)}"`).join(',')}`
 		: ''
 	const rslt = await executePgParameteredQuery<T, ObjectRow>(

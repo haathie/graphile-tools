@@ -1,6 +1,7 @@
 import { getRelationFieldName } from '@haathie/postgraphile-common-utils'
 import * as debug from 'debug'
-import type { PgCodecAttribute, PgResource } from 'postgraphile/@dataplan/pg'
+import type { PgCodec, PgCodecAttribute, PgResource } from 'postgraphile/@dataplan/pg'
+import type { InputObjectFieldApplyResolver } from 'postgraphile/grafast'
 import type { GraphQLInputFieldConfig, GraphQLInputObjectType, GraphQLInputType } from 'postgraphile/graphql'
 import { sql } from 'postgraphile/pg-sql2'
 import type { PGEntityColumn, PGEntityCtx } from './pg-utils.ts'
@@ -71,9 +72,7 @@ export function buildFieldsForCreate(
 						type: shouldNotNull
 							? new GraphQLNonNull(coreType)
 							: coreType,
-						apply(plan: PgRowBuilder, input) {
-							plan.set(attrName, input)
-						}
+						apply: buildApplyPlanForCodec(attrName, attr, build)
 					}
 				}
 			)
@@ -314,4 +313,81 @@ export const isInsertableAttribute = (
 	resource: PgCodecAttribute<any, any>,
 ) => {
 	return resource.extensions?.canInsert || resource.extensions?.isInsertable
+}
+
+function buildApplyPlanForCodec(
+	name: string,
+	{ codec }: PgCodecAttribute,
+	{ inflection }: GraphileBuild.Build,
+) {
+	const fieldAttrMap = buildFieldNameToAttrNameMap(codec, inflection)
+	const plan: InputObjectFieldApplyResolver<PgRowBuilder> = ($step, input) => {
+		if(!fieldAttrMap) {
+			return $step.set(name, input)
+		}
+
+		return $step.set(name, mapFieldsToAttrs(input, fieldAttrMap))
+	}
+
+	return plan
+}
+
+type FieldNameToAttrNameMap = {
+	[fieldName: string]: string | [string, FieldNameToAttrNameMap]
+}
+
+function buildFieldNameToAttrNameMap(
+	codec: PgCodec,
+	inflection: GraphileBuild.Inflection
+): FieldNameToAttrNameMap | undefined {
+	if(codec.arrayOfCodec) {
+		codec = codec.arrayOfCodec
+	}
+
+	if(!codec.attributes) {
+		return
+	}
+
+	const map: FieldNameToAttrNameMap = {}
+	for(const [attrName, attr] of Object.entries(codec.attributes)) {
+		const fieldName = inflection.attribute({
+			attributeName: attrName,
+			// @ts-ignore
+			codec,
+		})
+
+		map[fieldName] = attr.codec.attributes
+			? [attrName, buildFieldNameToAttrNameMap(attr.codec, inflection)!]
+			: attrName
+	}
+
+	return map
+}
+
+function mapFieldsToAttrs(
+	value: unknown,
+	map: FieldNameToAttrNameMap
+): unknown {
+	if(Array.isArray(value)) {
+		return value.map(v => mapFieldsToAttrs(v, map))
+	}
+
+	if(typeof value !== 'object' || value === null) {
+		return value
+	}
+
+	const attrs: Record<string, unknown> = {}
+	for(const [key, _value] of Object.entries(value)) {
+		const attrName = map[key]
+		if(typeof attrName === 'string') {
+			// simple attribute, just map it
+			attrs[attrName] = _value
+			continue
+		}
+
+		const [attrNameKey, subMap] = attrName
+		attrs[attrNameKey] = mapFieldsToAttrs(_value, subMap)
+	}
+
+	return attrs
 }
