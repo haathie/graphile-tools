@@ -67,7 +67,7 @@ mutation UpsertContacts {
   }) {
     affected
     items {
-			createdAt
+      createdAt
       updatedAt
       type
       orgId
