@@ -6,6 +6,10 @@ import { initHook } from './schema-init.ts'
 export const FancyMutationsPlugin: GraphileConfig.Plugin = {
 	name: 'FancyMutationsPlugin',
 	inflection: inflection,
+	after: [
+		'PgMutationUpdateDeletePlugin',
+		'PgMutationCreatePlugin',
+	],
 	schema: {
 		behaviorRegistry: {
 			'add': {

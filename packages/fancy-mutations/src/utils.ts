@@ -1,6 +1,6 @@
-import { getRelationFieldName } from '@haathie/postgraphile-common-utils'
+import { buildFieldNameToAttrNameMap, type FieldNameToAttrNameMap, getRelationFieldName } from '@haathie/postgraphile-common-utils'
 import * as debug from 'debug'
-import type { PgCodec, PgCodecAttribute, PgResource } from 'postgraphile/@dataplan/pg'
+import type { PgCodecAttribute, PgResource } from 'postgraphile/@dataplan/pg'
 import type { InputObjectFieldApplyResolver } from 'postgraphile/grafast'
 import type { GraphQLInputFieldConfig, GraphQLInputObjectType, GraphQLInputType } from 'postgraphile/graphql'
 import { sql } from 'postgraphile/pg-sql2'
@@ -253,7 +253,8 @@ export const isUpdatable = (
 		return false
 	}
 
-	return !!build.behavior.pgResourceMatches(resource, 'resource:update')
+	return !!build.behavior.pgResourceMatches(resource, 'bulkUpdate')
+		&& !!build.behavior.pgResourceMatches(resource, 'resource:update')
 }
 
 // from: https://github.com/graphile/crystal/blob/da7b7196c627e1151564f185f199a716206da903/graphile-build/graphile-build-pg/src/plugins/PgMutationUpdateDeletePlugin.ts#L154
@@ -281,7 +282,7 @@ export const isDeletable = (
 		return false
 	}
 
-	return !!build.behavior.pgResourceMatches(resource, 'resource:delete')
+	return !!build.behavior.pgResourceMatches(resource, 'bulkDelete')
 }
 
 // from: https://github.com/graphile/crystal/blob/da7b7196c627e1151564f185f199a716206da903/graphile-build/graphile-build-pg/src/plugins/PgMutationCreatePlugin.ts#L53C1-L62C3
@@ -305,7 +306,7 @@ export const isInsertable = (
 		return false
 	}
 
-	return build.behavior.pgResourceMatches(resource, 'resource:insert') === true
+	return build.behavior.pgResourceMatches(resource, 'bulkCreate') === true
 }
 
 export const isInsertableAttribute = (
@@ -330,38 +331,6 @@ function buildApplyPlanForCodec(
 	}
 
 	return plan
-}
-
-type FieldNameToAttrNameMap = {
-	[fieldName: string]: string | [string, FieldNameToAttrNameMap]
-}
-
-function buildFieldNameToAttrNameMap(
-	codec: PgCodec,
-	inflection: GraphileBuild.Inflection
-): FieldNameToAttrNameMap | undefined {
-	if(codec.arrayOfCodec) {
-		codec = codec.arrayOfCodec
-	}
-
-	if(!codec.attributes) {
-		return
-	}
-
-	const map: FieldNameToAttrNameMap = {}
-	for(const [attrName, attr] of Object.entries(codec.attributes)) {
-		const fieldName = inflection.attribute({
-			attributeName: attrName,
-			// @ts-ignore
-			codec,
-		})
-
-		map[fieldName] = attr.codec.attributes
-			? [attrName, buildFieldNameToAttrNameMap(attr.codec, inflection)!]
-			: attrName
-	}
-
-	return map
 }
 
 function mapFieldsToAttrs(

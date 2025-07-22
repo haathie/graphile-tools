@@ -293,8 +293,11 @@ export function scrapeCodecFromContext(
 				if(
 					fieldName
 						=== inflection.updateByKeysField?.({ resource: rsc, unique: uq })
-					|| fieldName
+					|| (
+						typeof inflection.nodeIdFieldName === 'function'
+						&& fieldName
 						=== inflection.updateNodeField?.({ resource: rsc, unique: uq })
+					)
 				) {
 					return codec
 				}
@@ -302,8 +305,11 @@ export function scrapeCodecFromContext(
 				if(
 					fieldName
 						=== inflection.deleteByKeysField?.({ resource: rsc, unique: uq })
-					|| fieldName
+					|| (
+						typeof inflection.nodeIdFieldName === 'function'
+						&& fieldName
 						=== inflection.deleteNodeField?.({ resource: rsc, unique: uq })
+					)
 				) {
 					return codec
 				}

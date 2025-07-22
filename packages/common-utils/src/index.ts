@@ -1,14 +1,23 @@
 import type {} from 'postgraphile'
-import { type PgCodecWithAttributes, PgResource } from 'postgraphile/@dataplan/pg'
+import { PgCodec, type PgCodecWithAttributes, PgResource } from 'postgraphile/@dataplan/pg'
 import { Modifier, Step } from 'postgraphile/grafast'
 import type {} from 'postgraphile/grafserv/express/v4'
 import { GraphQLInputObjectType, GraphQLObjectType, OperationTypeNode } from 'postgraphile/graphql'
 
-type _PgResource = PgResource<string, PgCodecWithAttributes>
+export type PgTableResource = PgResource<string, PgCodecWithAttributes>
+
+/**
+ * Field name to its internal PG attribute name.
+ * If the field is a relation, the value is a tuple of the
+ * attribute name and a map of its attributes.
+ */
+export type FieldNameToAttrNameMap = {
+	[fieldName: string]: string | [string, FieldNameToAttrNameMap]
+}
 
 export function getRelationFieldName(
 	relationName: string,
-	table: _PgResource,
+	table: PgTableResource,
 	{ inflection }: GraphileBuild.Build,
 ) {
 	const { isUnique } = table.getRelation(relationName)
@@ -22,7 +31,7 @@ export function getRelationFieldName(
 }
 
 export function getInputConditionForResource(
-	resource: _PgResource,
+	resource: PgTableResource,
 	{ inflection, getTypeByName }: GraphileBuild.Build,
 ): GraphQLInputObjectType | undefined {
 	const queryType = getTypeByName('Query')
@@ -73,4 +82,32 @@ export function getRequestIp(args: Grafast.RequestContext) {
 	}
 
 	return sock.remoteAddress
+}
+
+export function buildFieldNameToAttrNameMap(
+	codec: PgCodec,
+	inflection: GraphileBuild.Inflection
+): FieldNameToAttrNameMap | undefined {
+	if(codec.arrayOfCodec) {
+		codec = codec.arrayOfCodec
+	}
+
+	if(!codec.attributes) {
+		return
+	}
+
+	const map: FieldNameToAttrNameMap = {}
+	for(const [attrName, attr] of Object.entries(codec.attributes)) {
+		const fieldName = inflection.attribute({
+			attributeName: attrName,
+			// @ts-ignore
+			codec,
+		})
+
+		map[fieldName] = attr.codec.attributes
+			? [attrName, buildFieldNameToAttrNameMap(attr.codec, inflection)!]
+			: attrName
+	}
+
+	return map
 }
