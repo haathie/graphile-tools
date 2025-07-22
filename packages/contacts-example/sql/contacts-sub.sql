@@ -21,5 +21,5 @@ FOR ALL TO "app_user"
 -- allow selecting all subs, as they're not really selected
 USING (TRUE)
 WITH CHECK (
-	additional_data->'inputCondition'->>'teamId' = current_setting('app.org_id')
+	additional_data->'inputCondition'->>'orgId' = current_setting('app.org_id')
 );

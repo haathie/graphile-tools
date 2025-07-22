@@ -21,8 +21,6 @@ const preset: GraphileConfig.Preset = {
 		RateLimitsPlugin,
 	],
 	disablePlugins: [
-		'PgMutationCreatePlugin',
-		'PgMutationUpdateDeletePlugin',
 		'NodePlugin',
 	],
 	pgServices: [
@@ -33,12 +31,12 @@ const preset: GraphileConfig.Preset = {
 			superuserConnectionString: process.env.PG_URI,
 			poolConfig: { min: 15, max: 30 },
 			pgSettings(ctx) {
-				let teamId = ctx.http?.getHeader('org-id')
+				let teamId = getHeader('org-id')
 				if(typeof teamId !== 'string') {
 					teamId = 'default-org-id'
 				}
 
-				let userId = ctx.http?.getHeader('user-id')
+				let userId = getHeader('user-id')
 				if(typeof userId !== 'string') {
 					userId = 'default-user-id'
 				}
@@ -48,8 +46,18 @@ const preset: GraphileConfig.Preset = {
 					'app.org_id': teamId,
 					'app.user_id': userId,
 					'app.has_full_contacts_access': (
-						ctx.http?.getHeader('has_full_contacts_access') !== 'false'
+						getHeader('has_full_contacts_access') !== 'false'
 					).toString(),
+				}
+
+				function getHeader(name: string) {
+					if(ctx.http) {
+						return ctx.http.getHeader(name)
+					}
+
+					if(ctx.ws) {
+						return ctx.ws.normalizedConnectionParams?.[name]
+					}
 				}
 			},
 			pgSettingsForIntrospection: {

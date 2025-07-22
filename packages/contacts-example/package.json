@@ -5,11 +5,10 @@
 	"dependencies": {
 		"@graphile/simplify-inflection": "^8.0.0-beta.7",
 		"@haathie/fancy-conditions": "*",
-		"@haathie/postgraphile-fancy-mutations": "*",
 		"@haathie/fancy-subscriptions": "*",
-		"@haathie/postgraphile-reasonable-limits": "*",
+		"@haathie/postgraphile-fancy-mutations": "*",
 		"@haathie/postgraphile-rate-limits": "*",
-		"fastify": "^5.4.0",
+		"@haathie/postgraphile-reasonable-limits": "*",
 		"http-terminator": "^3.2.0"
 	}
 }
