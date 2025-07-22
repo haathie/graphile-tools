@@ -8,8 +8,13 @@ import { AccessStep, type FieldPlanResolver, loadMany, Step } from 'postgraphile
 import { type GraphQLFieldConfig, type GraphQLFieldExtensions, GraphQLList, GraphQLNonNull, GraphQLObjectType, type GraphQLObjectTypeConfig } from 'postgraphile/graphql'
 import { sql } from 'postgraphile/pg-sql2'
 import { CreateSubscriptionStep } from './CreateSubscriptionStep.ts'
+import { inflection } from './inflection.ts'
 import { LDSSource, type PgChangeData, type PgChangeOp } from './lds.ts'
 import { PgWhereBuilder } from './PgWhereBuilder.ts'
+import { schemaFieldsHook } from './schema-fields.ts'
+import { schemaInitHook } from './schema-init.ts'
+
+export type * from './types.ts'
 
 type _PgResource = PgResource<string, PgCodecWithAttributes, PgResourceUnique[], any>
 
@@ -20,23 +25,6 @@ type Hook = NonNullable<
 >['GraphQLObjectType_fields']
 
 type PlanResolver = FieldPlanResolver<any, any, any>
-
-declare global {
-	namespace GraphileConfig {
-		interface Preset {
-			subscriptions?: {
-				deviceId: string
-				publishChanges?: boolean
-			}
-		}
-	}
-
-	namespace GraphileBuild {
-		interface BehaviorStrings {
-			'subscribable': true
-		}
-	}
-}
 
 let subSrc: LDSSource
 
@@ -324,7 +312,7 @@ export const FancySubscriptionsPlugin: GraphileConfig.Plugin = {
 					}
 				}
 			) {
-				if(subSrc) {
+				if(LDSSource.isCurrentInitialized) {
 					return next()
 				}
 
@@ -355,7 +343,10 @@ export const FancySubscriptionsPlugin: GraphileConfig.Plugin = {
 
 					service.release = async(...args) => {
 						console.log('Releasing subscriptions source...')
-						await subSrc?.release()
+						if(LDSSource.isCurrentInitialized) {
+							await LDSSource.current.release()
+						}
+
 						await release?.(...args)
 						console.log('Subscriptions source released.')
 					}
@@ -367,17 +358,17 @@ export const FancySubscriptionsPlugin: GraphileConfig.Plugin = {
 					throw new Error('No superuser pool found in preset.')
 				}
 
-				subSrc = new LDSSource({
+				const src = LDSSource.init({
 					pool: superuserPool,
 					// will populate later
 					tablePatterns: [],
 					deviceId: deviceId,
 				})
-				await subSrc.listen()
+				await src.listen()
 				console.log('Subscriptions source initialized.')
 
 				if(publishChanges) {
-					await subSrc.startPublishChangeLoop()
+					await src.startPublishChangeLoop()
 					console.log('Publish change loop started.')
 				}
 
@@ -385,9 +376,11 @@ export const FancySubscriptionsPlugin: GraphileConfig.Plugin = {
 			}
 		}
 	},
+	inflection: inflection,
 	schema: {
 		hooks: {
-			'GraphQLObjectType_fields': graphQLSchemaHook,
+			'init': schemaInitHook,
+			'GraphQLObjectType_fields': schemaFieldsHook,
 		}
 	},
 }

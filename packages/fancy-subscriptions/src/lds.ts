@@ -43,6 +43,8 @@ type DataMap = { [_: string]: PgChangeData[] }
 
 export class LDSSource {
 
+	static #current: LDSSource | undefined
+
 	slotName: string
 	deviceId: string
 	tablePatterns: string[]
@@ -269,7 +271,10 @@ export class LDSSource {
 			if(err.code === '55006') {
 				// this error means that the slot is already in use by
 				// another session. Can ignore this
+				return
 			}
+
+			throw err
 		}
 	}
 
@@ -299,6 +304,10 @@ export class LDSSource {
 
 	async close() {
 		this.#closed = true
+
+		if(LDSSource.#current === this) {
+			LDSSource.#current = undefined
+		}
 
 		if(this.#publishClient) {
 			await this.#publishClient.release()
@@ -371,6 +380,29 @@ export class LDSSource {
 				})
 			})
 		}
+	}
+
+	static init(options: LDSSourceOptions): LDSSource {
+		if(LDSSource.#current) {
+			throw new Error('LDSSource already initialized.')
+		}
+
+		LDSSource.#current = new LDSSource(options)
+		return LDSSource.#current
+	}
+
+	static get isCurrentInitialized(): boolean {
+		return !!LDSSource.#current
+	}
+
+	static get current(): LDSSource {
+		if(!LDSSource.#current) {
+			throw new Error(
+				'LDSSource not initialized, call LDSSource.init() first.'
+			)
+		}
+
+		return LDSSource.#current
 	}
 }
 
