@@ -156,7 +156,7 @@ function registerUpdateType(
 				) as GraphQLObjectType
 				return {
 					key: { type: new GraphQLNonNull(pkType) },
-					changes: { type: new GraphQLNonNull(partialType) }
+					patch: { type: new GraphQLNonNull(partialType) }
 				}
 			}
 		}),
@@ -185,7 +185,7 @@ function registerUpdateType(
 						plan(parent: Step<PgChangeEvent>) {
 							return loadMany(parent, (values) => (
 								values.map(v => (
-									v.items.map(v => ({ key: v.row_before!, changes: v.diff! }))
+									v.items.map(v => ({ key: v.row_before!, patch: v.diff! }))
 								))
 							))
 						}
@@ -229,17 +229,8 @@ function registerPkType(
 				// if the NodeID plugin is enabled, we'll use that
 				const nodeIdFieldName = inflection.nodeIdFieldName?.()
 				const nodeIdField = ogFields[nodeIdFieldName]
-				if(nodeIdField) {
-					return {
-						[nodeIdFieldName]: {
-							type: nodeIdField.type,
-							extensions: nodeIdField.extensions,
-							description: nodeIdField.description
-						}
-					}
-				}
 
-				return pk.attributes.reduce((map, attr) => {
+				const fieldMap = pk.attributes.reduce((map, attr) => {
 					const fieldName = inflection.attribute({
 						attributeName: attr,
 						codec: resource.codec
@@ -249,6 +240,16 @@ function registerPkType(
 					map[fieldName] = { type, extensions, description }
 					return map
 				}, {} as { [fieldName: string]: GraphQLFieldConfig<any, any> })
+
+				if(nodeIdField) {
+					fieldMap[nodeIdFieldName] = {
+						type: nodeIdField.type,
+						extensions: nodeIdField.extensions,
+						description: nodeIdField.description
+					}
+				}
+
+				return fieldMap
 			}
 		}),
 		`${resource.name} - primary key`

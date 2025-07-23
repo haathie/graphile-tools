@@ -37,7 +37,8 @@ export const FancySubscriptionsPlugin: GraphileConfig.Plugin = {
 						pgServices = [],
 						subscriptions: {
 							deviceId,
-							publishChanges
+							publishChanges,
+							pollIntervalMs
 						} = {}
 					}
 				}
@@ -92,6 +93,7 @@ export const FancySubscriptionsPlugin: GraphileConfig.Plugin = {
 					// will populate later
 					tablePatterns: [],
 					deviceId: deviceId,
+					sleepDuration: pollIntervalMs
 				})
 				await src.listen()
 				DEBUG('Subscriptions source initialized.')

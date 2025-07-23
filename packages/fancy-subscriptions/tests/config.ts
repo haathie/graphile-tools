@@ -24,6 +24,8 @@ export const CONFIG: TestGraphileConfig = {
 		created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 		updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 	);
+	-- required for updates to work properly
+	ALTER TABLE subs_test.books REPLICA IDENTITY FULL;
 
 	CREATE INDEX IF NOT EXISTS books_creator_id_idx
 		ON "subs_test"."books" (creator_id);
@@ -44,6 +46,7 @@ export const CONFIG: TestGraphileConfig = {
 		subscriptions: {
 			deviceId: process.env.DEVICE_ID!,
 			publishChanges: true,
+			pollIntervalMs: 750,
 		},
 		pgServices: [
 			makePgService({

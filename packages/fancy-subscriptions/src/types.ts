@@ -8,6 +8,7 @@ declare global {
 			subscriptions?: {
 				deviceId: string
 				publishChanges?: boolean
+				pollIntervalMs?: number
 			}
 		}
 	}

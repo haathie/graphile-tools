@@ -22,6 +22,39 @@ const CREATE_QL = `mutation CreateBook($input: BookInput!) {
 	}
 }`
 
+const UPDATE_QL = `mutation UpdateBook($input: UpdateBookInput!) {
+	updateBook(input: $input) {
+		book {
+			id
+			rowId
+			title
+			author
+			metadata
+			creatorId
+			createdAt
+			updatedAt
+		}
+	}
+}`
+
+const CREATE_SUB_QL = `subscription BooksCreated($creatorId: String!) {
+	booksCreated(
+		condition: { creatorId: $creatorId }
+	) {
+		eventId
+		items {
+			id
+			rowId
+			title
+			author
+			metadata
+			creatorId
+			createdAt
+			updatedAt
+		}
+	}
+}`
+
 describe('Fancy Subscriptions', () => {
 
 	let srv: BootedGraphileServer
@@ -58,29 +91,10 @@ describe('Fancy Subscriptions', () => {
 		assert.ok(!subFields['authorsCreated'])
 	})
 
-	it('should subscribe to book changes', async() => {
-		const createSubQl = `subscription BooksCreated($creatorId: String!) {
-			booksCreated(
-				condition: { creatorId: $creatorId }
-			) {
-				eventId
-				items {
-					id
-					rowId
-					title
-					author
-					metadata
-					creatorId
-					createdAt
-					updatedAt
-				}
-			}
-		}`
+	it('should subscribe to created items', async() => {
 		const iterator = client.iterate({
-			query: createSubQl,
-			variables: {
-				creatorId: TEST_USER_ID
-			}
+			query: CREATE_SUB_QL,
+			variables: { creatorId: TEST_USER_ID }
 		})
 
 		const nextValue = iterator.next()
@@ -110,7 +124,7 @@ describe('Fancy Subscriptions', () => {
 		it('should not trigger subscription for other users', async() => {
 			const userId2 = 'another-user'
 			const iterate2 = client.iterate({
-				query: createSubQl,
+				query: CREATE_SUB_QL,
 				variables: {
 					creatorId: userId2
 				}
@@ -139,6 +153,170 @@ describe('Fancy Subscriptions', () => {
 				setTimeout(500).then(() => 'did not trigger')
 			])
 			assert.strictEqual(ogSub, 'did not trigger')
+
+			await iterate2.return?.()
+			await iterator.return?.()
 		})
+	})
+
+	it('should subscribe to updated items', async() => {
+		const updateSubQl = `subscription BooksUpdated($creatorId: String!) {
+			booksUpdated(
+				condition: { creatorId: $creatorId }
+			) {
+				eventId
+				items {
+					key {
+						id
+						rowId
+					}
+					patch {
+						title
+						author
+						metadata
+					}
+				}
+			}
+		}`
+		const iterator = client.iterate({
+			query: updateSubQl,
+			variables: {
+				creatorId: TEST_USER_ID
+			}
+		})
+
+		const nextValue = iterator.next()
+
+		const { createBook: { book } } = await srv.graphqlRequest<any>({
+			query: CREATE_QL,
+			variables: {
+				input: {
+					title: 'Test Book',
+					author: 'Somebody',
+				}
+			},
+			headers: { 'x-user-id': TEST_USER_ID }
+		})
+
+		await srv.graphqlRequest({
+			query: UPDATE_QL,
+			variables: {
+				input: {
+					id: book.id,
+					bookPatch: { title: 'Updated Book Title' }
+				}
+			},
+			headers: { 'x-user-id': TEST_USER_ID }
+		})
+
+		const {
+			value: { data: { booksUpdated: { eventId, items } } }
+		} = await nextValue
+
+		assert.ok(eventId)
+		assert.strictEqual(items.length, 1)
+		assert.partialDeepStrictEqual(
+			items[0],
+			{
+				key: {
+					rowId: book.rowId,
+				},
+				patch: {
+					title: 'Updated Book Title',
+				}
+			}
+		)
+	})
+
+	it('should subscribe to deleted items', async() => {
+		const deleteSubQl = `subscription BooksDeleted($creatorId: String!) {
+			booksDeleted(
+				condition: { creatorId: $creatorId }
+			) {
+				eventId
+				items {
+					id
+					rowId
+				}
+			}
+		}`
+		const iterator = client.iterate({
+			query: deleteSubQl,
+			variables: {
+				creatorId: TEST_USER_ID
+			}
+		})
+
+		const nextValue = iterator.next()
+
+		const { createBook: { book } } = await srv.graphqlRequest<any>({
+			query: CREATE_QL,
+			variables: {
+				input: {
+					title: 'Test Book',
+					author: 'Wow',
+				}
+			},
+			headers: { 'x-user-id': TEST_USER_ID }
+		})
+
+		await srv.graphqlRequest({
+			query: `mutation DeleteBook($input: DeleteBookInput!) {
+				deleteBook(input: $input) {
+					deletedBookId
+				}
+			}`,
+			variables: {
+				input: { id: book.id }
+			},
+			headers: { 'x-user-id': TEST_USER_ID }
+		})
+
+		const {
+			value: { data: { booksDeleted: { eventId, items } } }
+		} = await nextValue
+		assert.ok(eventId)
+		assert.strictEqual(items.length, 1)
+
+		assert.partialDeepStrictEqual(
+			items,
+			[{ rowId: book.rowId }]
+		)
+	})
+
+	it('should correctly batch events', async() => {
+		// we'll test by creating multiple books
+		const iterator = client.iterate({
+			query: CREATE_SUB_QL,
+			variables: { creatorId: TEST_USER_ID }
+		})
+
+		const nextValue = iterator.next()
+
+		const books = await Promise.all(
+			Array.from({ length: 5 }).map(async(_, i) => {
+				const { createBook: { book } } = await srv.graphqlRequest<any>({
+					query: CREATE_QL,
+					variables: {
+						input: {
+							title: `Test Book ${i}`,
+							author: 'Somebody',
+						}
+					},
+					headers: { 'x-user-id': TEST_USER_ID }
+				})
+				return book
+			})
+		)
+
+		const rslt = await nextValue
+		const { value: { data: { booksCreated: { eventId, items } } } } = rslt
+		assert.ok(eventId)
+		for(const book of books) {
+			const item = items.find((i: any) => i.rowId === book.rowId)
+			assert.ok(item, `Book with rowId ${book.rowId} not found in items`)
+			assert.strictEqual(item.title, book.title)
+			assert.strictEqual(item.author, book.author)
+		}
 	})
 })
