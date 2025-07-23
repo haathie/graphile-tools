@@ -30,5 +30,9 @@ process.once('SIGINT', async() => {
 	await terminator.terminate()
 	console.log('Server closed')
 
+	for(const srv of preset.pgServices || []) {
+		await srv.release?.()
+	}
+
 	process.exit(0)
 })
