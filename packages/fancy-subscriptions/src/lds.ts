@@ -2,6 +2,7 @@ import { JSONSerialiser, PGMBClient, type PGMBOnMessageOpts } from '@haathie/pgm
 import { Pool, type PoolClient } from 'pg'
 import { PassThrough, type Writable } from 'stream'
 import { setTimeout } from 'timers/promises'
+import { DEBUG } from './utils.ts'
 
 type LDSSourceOptions = {
 	pool: Pool
@@ -238,7 +239,7 @@ export class LDSSource {
 				return
 			}
 
-			console.log(`Stream closed for subscriptionId: ${subscriptionId}`)
+			DEBUG(`Stream closed for subscriptionId: ${subscriptionId}`)
 			delete this.#subscribers[subscriptionId]
 
 			if(deleteOnClose) {
@@ -248,7 +249,7 @@ export class LDSSource {
 						+ ' WHERE id = $1',
 						[subscriptionId]
 					)
-					console.log(`Deleted subscription: ${subscriptionId}`)
+					DEBUG(`Deleted subscription: ${subscriptionId}`)
 				} catch(e: any) {
 					console.error(
 						`Error deleting subscription ${subscriptionId}:`, e

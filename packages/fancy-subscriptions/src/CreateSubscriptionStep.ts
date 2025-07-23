@@ -3,6 +3,7 @@ import { type ExecutionDetails, type ExecutionResults, Step } from 'postgraphile
 import { type SQL, sql } from 'postgraphile/pg-sql2'
 import { LDSSource, type PgChangeOp } from './lds.ts'
 import { PgWhereBuilder } from './PgWhereBuilder.ts'
+import { DEBUG } from './utils.ts'
 
 export class CreateSubscriptionStep extends Step<any> {
 
@@ -87,7 +88,7 @@ export class CreateSubscriptionStep extends Step<any> {
 					.query<{ id: string, topic: string }>({ text, values: params })
 			)
 
-			console.log(
+			DEBUG(
 				`Created subscription ${row.id}, on topic ${row.topic}`
 				+ (
 					this.#kind === 'update'
