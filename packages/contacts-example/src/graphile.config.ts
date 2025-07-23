@@ -1,7 +1,7 @@
 import { PgSimplifyInflectionPreset } from '@graphile/simplify-inflection'
 import { FancyConditionsPlugin } from '@haathie/fancy-conditions'
-import { FancySubscriptionsPlugin } from '@haathie/fancy-subscriptions'
 import { FancyMutationsPlugin } from '@haathie/postgraphile-fancy-mutations'
+import { FancySubscriptionsPlugin } from '@haathie/postgraphile-fancy-subscriptions'
 import { RateLimitsPlugin } from '@haathie/postgraphile-rate-limits'
 import { ReasonableLimitsPlugin } from '@haathie/postgraphile-reasonable-limits'
 import { makePgService } from 'postgraphile/adaptors/pg'

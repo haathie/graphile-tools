@@ -1,16 +1,10 @@
 {
-	"name": "@haathie/fancy-subscriptions",
+	"name": "@haathie/postgraphile-fancy-subscriptions",
 	"version": "0.1.0",
 	"type": "module",
-	"files": [
-		"lib"
-	],
-	"exports": {
-		".": {
-			"import": "./src/index.ts"
-		},
-		"./package.json": "./package.json"
-	},
+	"files": ["lib"],
+	"main": "lib/index.js",
+	"types": "lib/index.d.ts",
 	"scripts": {
 		"build": "tsc -p tsconfig.json"
 	},
