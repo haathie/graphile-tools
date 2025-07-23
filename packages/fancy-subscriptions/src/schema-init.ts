@@ -1,8 +1,8 @@
 import { buildFieldNameToAttrNameMap } from '@haathie/postgraphile-common-utils'
-import { LoadedRecordStep, type Step } from 'postgraphile/grafast'
+import type { GrafastFieldConfig, Step } from 'postgraphile/grafast'
 import type { GraphQLFieldConfig, GraphQLFieldExtensions, GraphQLObjectType } from 'postgraphile/graphql'
 import { CreateSubscriptionStep } from './CreateSubscriptionStep.ts'
-import { LDSSource, type PgChangeData } from './lds.ts'
+import { LDSSource, type PgChangeEvent } from './lds.ts'
 import type { PgTableResource } from './types.ts'
 import { isSubscribable } from './utils.ts'
 
@@ -48,7 +48,7 @@ function registerCreateType(
 ) {
 	const {
 		inflection,
-		graphql: { GraphQLString, GraphQLNonNull, GraphQLList },
+		graphql: { GraphQLNonNull, GraphQLList },
 		grafast: { loadMany },
 		registerObjectType,
 		getTypeByName
@@ -67,18 +67,15 @@ function registerCreateType(
 					inflection.pureTypeName(resource)
 				)! as GraphQLObjectType
 				return {
-					eventId: {
-						type: new GraphQLNonNull(GraphQLString),
-						description: 'ID of the event',
-					},
+					eventId: createEventIdField(build),
 					items: {
 						type: new GraphQLNonNull(
 							new GraphQLList(new GraphQLNonNull(createdType))
 						),
 						description: `New ${resource.name} items created`,
-						plan(parent: Step<PgChangeData[]>) {
+						plan(parent: Step<PgChangeEvent>) {
 							return loadMany(parent, (values) => (
-								values.map(v => v.map(v => v.row_data))
+								values.map(v => v.items.map(v => v.row_data))
 							))
 						}
 					}
@@ -95,7 +92,8 @@ function registerDeleteType(
 ) {
 	const {
 		inflection,
-		graphql: { GraphQLString, GraphQLNonNull, GraphQLList },
+		graphql: { GraphQLNonNull, GraphQLList },
+		grafast: { loadMany },
 		registerObjectType,
 		getTypeByName
 	} = build
@@ -113,15 +111,17 @@ function registerDeleteType(
 					inflection.primaryKeyTypeName(resource)
 				)! as GraphQLObjectType
 				return {
-					eventId: {
-						type: new GraphQLNonNull(GraphQLString),
-						description: 'ID of the event',
-					},
+					eventId: createEventIdField(build),
 					items: {
 						type: new GraphQLNonNull(
 							new GraphQLList(new GraphQLNonNull(pkType))
 						),
-						description: `The ${resource.name} items that were deleted`
+						description: `The ${resource.name} items that were deleted`,
+						plan(parent: Step<PgChangeEvent>) {
+							return loadMany(parent, (values) => (
+								values.map(({ items }) => items.map(v => v.row_data))
+							))
+						}
 					}
 				}
 			}
@@ -136,7 +136,8 @@ function registerUpdateType(
 ) {
 	const {
 		inflection,
-		graphql: { GraphQLString, GraphQLNonNull, GraphQLList },
+		graphql: { GraphQLNonNull, GraphQLList },
+		grafast: { loadMany },
 		registerObjectType,
 		getTypeByName
 	} = build
@@ -156,9 +157,7 @@ function registerUpdateType(
 				) as GraphQLObjectType
 				return {
 					key: { type: new GraphQLNonNull(pkType) },
-					changes: {
-						type: new GraphQLNonNull(partialType),
-					}
+					changes: { type: new GraphQLNonNull(partialType) }
 				}
 			}
 		}),
@@ -178,15 +177,19 @@ function registerUpdateType(
 					inflection.subscriptionUpdateObjectTypeName(resource)
 				)! as GraphQLObjectType
 				return {
-					eventId: {
-						type: new GraphQLNonNull(GraphQLString),
-						description: 'ID of the event',
-					},
+					eventId: createEventIdField(build),
 					items: {
 						type: new GraphQLNonNull(
 							new GraphQLList(new GraphQLNonNull(updatedType))
 						),
-						description: `The ${resource.name} items that were updated`
+						description: `The ${resource.name} items that were updated`,
+						plan(parent: Step<PgChangeEvent>) {
+							return loadMany(parent, (values) => (
+								values.map(v => (
+									v.items.map(v => ({ key: v.row_before!, changes: v.diff! }))
+								))
+							))
+						}
 					}
 				}
 			}
@@ -338,11 +341,26 @@ function registerPartialType(
 	)
 }
 
+function createEventIdField(
+	{
+		graphql: { GraphQLNonNull, GraphQLString },
+		grafast: { lambda },
+	}: GraphileBuild.Build
+): GrafastFieldConfig<any, any> {
+	return {
+		type: new GraphQLNonNull(GraphQLString),
+		description: 'ID of the event',
+		plan(parent: Step<PgChangeEvent>) {
+			return lambda(parent, p => p.eventId)
+		}
+	}
+}
+
 function wrapWithSetAccess(
 	extensions: GraphQLFieldExtensions<any, any> | undefined,
 	attributeName: string,
 	fieldName: string,
-	{ grafast: { AccessStep } }: GraphileBuild.Build
+	{ grafast: { AccessStep, LoadedRecordStep } }: GraphileBuild.Build
 ): GraphQLFieldExtensions<any, any> {
 	const ogPlan = extensions?.grafast?.plan
 	return {

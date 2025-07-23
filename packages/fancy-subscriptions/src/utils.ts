@@ -1,4 +1,7 @@
+import debug from 'debug'
 import type { PgCodec, PgCodecWithAttributes } from 'postgraphile/@dataplan/pg'
+
+export const DEBUG = debug.default('@haathie/postgraphile-fancy-mutations:log')
 
 export function isSubscribable(
 	codec: PgCodec,

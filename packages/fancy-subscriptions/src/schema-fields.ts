@@ -91,6 +91,7 @@ export const schemaFieldsHook: Hook = (
 						subscribePlan: createSubscriptionPlan(
 							resource, 'delete', build
 						),
+						plan: p => p
 					})
 				),
 				[updatedName]: fieldWithHooks(
@@ -106,6 +107,7 @@ export const schemaFieldsHook: Hook = (
 						subscribePlan: createSubscriptionPlan(
 							resource, 'update', build
 						),
+						plan: p => p
 					})
 				)
 			},

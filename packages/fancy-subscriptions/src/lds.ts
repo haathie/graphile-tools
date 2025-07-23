@@ -14,6 +14,11 @@ type LDSSourceOptions = {
 
 type Row = { [_: string]: unknown }
 
+export type PgChangeEvent = {
+	eventId: string
+	items: PgChangeData[]
+}
+
 export type PgChangeOp = 'insert' | 'update' | 'delete'
 
 export type PgChangeData = {
@@ -52,7 +57,7 @@ export class LDSSource {
 	sleepDuration: number
 
 	#pool: Pool
-	#pgmb: PGMBClient
+	#pgmb: PGMBClient<DataMap, DataMap>
 	#closed = false
 	#subscribers: { [topic: string]: Writable } = {}
 	#consumerPromise?: Promise<void>
@@ -72,7 +77,7 @@ export class LDSSource {
 		this.tablePatterns = tablePatterns
 		this.sleepDuration = sleepDuration
 		this.#pool = pool
-		this.#pgmb = new PGMBClient<DataMap>({
+		this.#pgmb = new PGMBClient<DataMap, DataMap>({
 			pool: this.#pool,
 			serialiser: JSONSerialiser,
 			consumers: [
@@ -353,7 +358,7 @@ export class LDSSource {
 	async #handleMessage({
 		msgs,
 		logger
-	}: PGMBOnMessageOpts<string, { [_: string]: unknown }, PgChangeData[]>) {
+	}: PGMBOnMessageOpts<string, DataMap, PgChangeData[]>) {
 		for(const { id, headers, message } of msgs) {
 			const { subscriptionId } = headers
 			if(!subscriptionId) {
@@ -371,7 +376,8 @@ export class LDSSource {
 			}
 
 			await new Promise<void>((resolve, reject) => {
-				stream.write(message, err => {
+				const msg: PgChangeEvent = { eventId: id, items: message }
+				stream.write(msg, err => {
 					if(err) {
 						reject(err)
 					} else {

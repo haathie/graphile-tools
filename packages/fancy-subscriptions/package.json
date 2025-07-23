@@ -15,8 +15,9 @@
 		"build": "tsc -p tsconfig.json"
 	},
 	"dependencies": {
+		"@haathie/pgmb": "^0.1.9",
 		"@haathie/postgraphile-common-utils": "^0.1.0",
-		"@haathie/pgmb": "^0.1.9"
+		"debug": "^4.4.1"
 	},
 	"peerDependencies": {
 		"postgraphile": "*"
