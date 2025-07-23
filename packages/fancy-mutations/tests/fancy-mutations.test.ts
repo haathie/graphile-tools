@@ -149,6 +149,50 @@ describe('Fancy Mutations', () => {
 		assert.strictEqual(items[0].rowId, items2[0].rowId)
 	})
 
+	it('should execute mutations in parallel', async() => {
+		const rslts = await Promise.all(
+			Array.from({ length: 10 }, async(_, i) => {
+				const input = [
+					{
+						name: `Bulk Author ${i}`,
+						'booksByAuthorId': [
+							{
+								'title': 'BBook ' + (i + 1),
+							}
+						]
+					},
+					{
+						name: `Bulk Author 2nd - ${i + 1}`,
+						booksByAuthorId: []
+					}
+				]
+				const {
+					createAuthors: { items }
+				} = await srv.graphqlRequest<SimpleUpsertResult>({
+					query: UPSERT_QL,
+					variables: { onConflict: 'DoNothing', input }
+				})
+
+				return { input, output: items }
+			})
+		)
+
+		for(const { input, output } of rslts) {
+			assert.strictEqual(output.length, input.length)
+			assert.partialDeepStrictEqual(
+				output,
+				input.map(item => ({
+					name: item.name,
+					booksByAuthorId: {
+						nodes: item.booksByAuthorId.map(book => ({
+							title: book.title,
+						}))
+					}
+				}))
+			)
+		}
+	})
+
 	it('should bulk create authors with onConflict: Error', async() => {
 		const input = [
 			{
