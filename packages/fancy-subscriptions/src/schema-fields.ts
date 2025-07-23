@@ -31,7 +31,7 @@ export const schemaFieldsHook: Hook = (
 	} = build
 
 	for(const resource of Object.values(pgResources)) {
-		if(!isSubscribable(resource.codec, build)) {
+		if(!isSubscribable(resource, build)) {
 			continue // not subscribable
 		}
 

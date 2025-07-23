@@ -12,6 +12,22 @@ import { DEBUG } from './utils.ts'
 
 export const FancySubscriptionsPlugin: GraphileConfig.Plugin = {
 	name: 'FancySubscriptionsPlugin',
+	inflection: inflection,
+	schema: {
+		behaviorRegistry: {
+			'add': {
+				'subscribable': {
+					description:
+						'Creates create, update, and delete subscriptions for the resource',
+					entities: ['pgResource']
+				}
+			}
+		},
+		hooks: {
+			'init': schemaInitHook,
+			'GraphQLObjectType_fields': schemaFieldsHook,
+		}
+	},
 	grafserv: {
 		middleware: {
 			async setPreset(
@@ -87,13 +103,6 @@ export const FancySubscriptionsPlugin: GraphileConfig.Plugin = {
 
 				return next()
 			}
-		}
-	},
-	inflection: inflection,
-	schema: {
-		hooks: {
-			'init': schemaInitHook,
-			'GraphQLObjectType_fields': schemaFieldsHook,
 		}
 	},
 }

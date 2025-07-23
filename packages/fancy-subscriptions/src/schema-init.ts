@@ -14,14 +14,13 @@ type Hook = NonNullable<
 
 export const schemaInitHook: Hook = (init, build) => {
 	const subSrc = LDSSource.current
-	const { allPgCodecs, inflection } = build
+	const { input: { pgRegistry: { pgResources } }, inflection } = build
 
-	for(const codec of allPgCodecs) {
-		if(!isSubscribable(codec, build)) {
+	for(const resource of Object.values(pgResources)) {
+		if(!isSubscribable(resource, build)) {
 			continue
 		}
 
-		const resource = build.pgTableResource(codec) as PgTableResource
 		const pgInfo = resource.codec.extensions!.pg!
 
 		subSrc.tablePatterns.push(`${pgInfo.schemaName}.${pgInfo.name}`)
