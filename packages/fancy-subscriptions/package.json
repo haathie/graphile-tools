@@ -21,5 +21,8 @@
 	},
 	"peerDependencies": {
 		"postgraphile": "*"
+	},
+	"devDependencies": {
+		"graphql-ws": "^6.0.6"
 	}
 }

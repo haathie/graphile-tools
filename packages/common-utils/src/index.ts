@@ -8,8 +8,9 @@ export type PgTableResource = PgResource<string, PgCodecWithAttributes>
 
 /**
  * Field name to its internal PG attribute name.
- * If the field is a relation, the value is a tuple of the
- * attribute name and a map of its attributes.
+ * If the field is a compound field, the value is an array
+ * where the first element is the attribute name, and the second
+ * element is a map of sub-fields to their attribute names.
  */
 export type FieldNameToAttrNameMap = {
 	[fieldName: string]: string | [string, FieldNameToAttrNameMap]

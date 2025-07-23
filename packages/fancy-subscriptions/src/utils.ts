@@ -1,7 +1,7 @@
 import debug from 'debug'
 import type { PgResource } from 'postgraphile/@dataplan/pg'
 
-export const DEBUG = debug.default('@haathie/postgraphile-fancy-mutations:log')
+export const DEBUG = debug.default('@haathie/postgraphile-fancy-subscriptions:log')
 
 export function isSubscribable(
 	rsc: PgResource,

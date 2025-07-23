@@ -1,3 +1,4 @@
+import { readFile } from 'fs/promises'
 import { createServer } from 'http'
 import { postgraphile, type PostGraphileInstance } from 'postgraphile'
 import { grafserv } from 'postgraphile/grafserv/node'
@@ -81,8 +82,20 @@ export async function bootPreset(
 			})
 		})
 
-		await pglServ.release()
+		await pgl.release()
+		for(const srv of preset.pgServices || []) {
+			await srv.release?.()
+		}
 	}
+}
+
+export async function runSqlFile(
+	preset: GraphileConfig.Preset,
+	filePath: string
+) {
+	const pool = getSuperuserPool(preset)
+	const sqlStr = await readFile(filePath, 'utf8')
+	await pool.query(`BEGIN;\n${sqlStr}\nCOMMIT;`)
 }
 
 async function graphqlRequest<T>(

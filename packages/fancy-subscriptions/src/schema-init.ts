@@ -283,8 +283,14 @@ function registerPureType(
 				const ogFields = ogModel.getFields()
 				return Object.entries(ogFields).reduce((map, [fieldName, field]) => {
 					// we'll skip all relations
-					const attrName = fieldToAttrMap[fieldName]
-					if(typeof attrName !== 'string') {
+					const attrName = typeof fieldToAttrMap[fieldName] === 'string'
+						? fieldToAttrMap[fieldName]
+						: fieldToAttrMap[fieldName]?.[0]
+					if(
+						!attrName
+						// we'll allow the nodeId field to be present
+						&& fieldName !== inflection.nodeIdFieldName?.()
+					) {
 						return map
 					}
 
