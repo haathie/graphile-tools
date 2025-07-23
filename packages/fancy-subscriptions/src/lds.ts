@@ -10,7 +10,11 @@ type LDSSourceOptions = {
 
 	slotName?: string
 	tablePatterns?: string[]
-	sleepDuration?: number
+	/**
+	 * Time to sleep for between publishing changes.
+	 * @default 500
+	 */
+	sleepDurationMs?: number
 }
 
 type Row = { [_: string]: unknown }
@@ -20,7 +24,7 @@ export type PgChangeEvent = {
 	items: PgChangeData[]
 }
 
-export type PgChangeOp = 'insert' | 'update' | 'delete'
+export type PgChangeOp = 'I' | 'U' | 'D'
 
 export type PgChangeData = {
 	lsn: string
@@ -54,8 +58,8 @@ export class LDSSource {
 	slotName: string
 	deviceId: string
 	tablePatterns: string[]
-	chunkSize = 500
-	sleepDuration: number
+	chunkSize = 250
+	sleepDurationMs: number
 
 	#pool: Pool
 	#pgmb: PGMBClient<DataMap, DataMap>
@@ -71,12 +75,12 @@ export class LDSSource {
 		deviceId,
 		slotName = 'postgraphile',
 		tablePatterns = ['*.*'],
-		sleepDuration = 500
+		sleepDurationMs = 500
 	}: LDSSourceOptions) {
 		this.deviceId = deviceId
 		this.slotName = slotName
 		this.tablePatterns = tablePatterns
-		this.sleepDuration = sleepDuration
+		this.sleepDurationMs = sleepDurationMs
 		this.#pool = pool
 		this.#pgmb = new PGMBClient<DataMap, DataMap>({
 			pool: this.#pool,
@@ -143,15 +147,10 @@ export class LDSSource {
 		} else {
 			params.push(topic.schema, topic.table, topic.kind)
 			values.push(
-				`postgraphile_meta.get_topic_from_change_json(
-					jsonb_object(
-						ARRAY['schema', 'table', 'kind'],
-						ARRAY[
-							$${params.length - 2}::varchar,
-							$${params.length - 1}::varchar,
-							$${params.length}::varchar
-						]
-					)
+				`postgraphile_meta.create_topic(
+					$${params.length - 2}::varchar,
+					$${params.length - 1}::varchar,
+					$${params.length}::varchar
 				)`
 			)
 		}
@@ -212,7 +211,7 @@ export class LDSSource {
 
 		await this.listen()
 
-		console.log(`Creating stream for subscriptionId: ${subscriptionId}`)
+		DEBUG(`Creating stream for subscriptionId: ${subscriptionId}`)
 
 		const stream = new PassThrough({ objectMode: true, highWaterMark: 1 })
 		stream.on('close', onEnd.bind(this))
@@ -269,9 +268,9 @@ export class LDSSource {
 		try {
 			await this.#publishClient.query(
 				`SELECT FROM postgraphile_meta.send_changes_to_subscriptions(
-					$1, NULL, $2, 'add-tables', $3
+					$1, $2, $3::text[]
 				)`,
-				[this.slotName, this.chunkSize, this.tablePatterns.join(',')]
+				[this.slotName, this.chunkSize, this.tablePatterns]
 			)
 		} catch(err: any) {
 			if(err.code === '55006') {
@@ -335,7 +334,7 @@ export class LDSSource {
 		while(!this.#closed) {
 			try {
 				await this.publishChanges()
-				await setTimeout(this.sleepDuration)
+				await setTimeout(this.sleepDurationMs)
 			} catch(e: any) {
 				console.error('Error publishing changes:', e)
 			}

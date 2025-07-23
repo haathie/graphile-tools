@@ -138,79 +138,91 @@ SELECT jsonb_object_agg(key, value) FROM (
 $$ LANGUAGE sql IMMUTABLE STRICT PARALLEL SAFE;
 
 -- Function to get the topic from a wal2json single change JSON
-CREATE OR REPLACE FUNCTION postgraphile_meta.get_topic_from_change_json(
-	change_json jsonb
+CREATE OR REPLACE FUNCTION postgraphile_meta.create_topic(
+	schema_name varchar(64),
+	table_name varchar(64),
+	kind varchar(16)
 ) RETURNS varchar(255) AS $$
 BEGIN
-	RETURN (change_json->>'schema')
-		|| '.' || (change_json->>'table')
-		|| '.' || (change_json->>'kind');
+	RETURN schema_name || '.' || table_name || '.' || kind;
 END
 $$ LANGUAGE plpgsql IMMUTABLE STRICT PARALLEL SAFE;
 
 CREATE OR REPLACE FUNCTION postgraphile_meta.get_changes(
 	slot_name name,
-	upto_lsn pg_lsn DEFAULT NULL,
-	upto_nchanges int DEFAULT 10,
-	VARIADIC options text[] DEFAULT '{}'::text[]
+	upto_nchanges int,
+	table_names text[]
 ) RETURNS SETOF postgraphile_meta.change_info AS $$
-SELECT
-	(
-		cs.lsn,
-		change->>'kind',
-		change->>'table',
-		change->>'schema',
-		-- topic is a combination of table, schema and kind
-		postgraphile_meta.get_topic_from_change_json(change),
-		-- before
-		CASE
-			WHEN change->>'kind' = 'update' THEN before
-		END,
-		-- data
-		CASE
-			WHEN change->>'kind' IN ('insert', 'update')
-				THEN after
-			WHEN change->>'kind' = 'delete'
-				THEN before
-			ELSE NULL
-		END,
-		-- diff
-		CASE
-			WHEN change->>'kind' = 'update'
-				THEN postgraphile_meta.jsonb_diff(after, before)
-		END
-	) FROM (
-		SELECT *, jsonb_array_elements(data::jsonb->'change') AS change
-		FROM pg_catalog.pg_logical_slot_get_changes(
-			slot_name, upto_lsn, upto_nchanges, VARIADIC options
+	SELECT
+		(
+			cs.lsn,
+			data->>'action',
+			data->>'table',
+			data->>'schema',
+			-- topic is a combination of table, schema and action
+			postgraphile_meta.create_topic(
+				data->>'schema',
+				data->>'table',
+				data->>'action'
+			),
+			-- before
+			CASE
+				WHEN data->>'action' = 'U' THEN before.item
+			END,
+			-- data
+			CASE
+				WHEN data->>'action' IN ('I', 'U')
+					THEN after.item
+				WHEN data->>'action' = 'D'
+					THEN before.item
+				ELSE NULL
+			END,
+			-- diff
+			CASE
+				WHEN data->>'action' = 'U'
+					THEN postgraphile_meta.jsonb_diff(after.item, before.item)
+			END
 		)
-) AS cs
-CROSS JOIN LATERAL jsonb_object(
-	ARRAY(SELECT jsonb_array_elements_text(cs.change->'columnnames')),
-	ARRAY(SELECT jsonb_array_elements_text(cs.change->'columnvalues'))
-) as after
-CROSS JOIN LATERAL jsonb_object(
-	ARRAY(SELECT jsonb_array_elements_text(cs.change->'oldkeys'->'keynames')),
-	ARRAY(SELECT jsonb_array_elements_text(cs.change->'oldkeys'->'keyvalues'))
-) as before
+	FROM (
+		SELECT lsn, data::jsonb as data
+		FROM pg_catalog.pg_logical_slot_peek_changes(
+			slot_name, null, upto_nchanges,
+			'add-tables', array_to_string(table_names, ','),
+			'format-version', '2',
+			'include-types', 'false',
+			'actions', 'insert,update,delete',
+			'include-transaction', 'false'
+		)
+	) AS cs
+	CROSS JOIN LATERAL (
+		SELECT jsonb_object_agg(elem->>'name', elem->'value')
+		FROM jsonb_array_elements(data->'columns') as elem
+	) as after(item)
+	CROSS JOIN LATERAL (
+		SELECT jsonb_object_agg(elem->>'name', elem->'value')
+		FROM jsonb_array_elements(data->'identity') as elem
+	) as before(item);
 $$ LANGUAGE sql VOLATILE;
 
 -- Function to send changes to match & send changes to relevant subscriptions
 CREATE OR REPLACE FUNCTION postgraphile_meta.send_changes_to_subscriptions(
 	slot_name name,
-	upto_lsn pg_lsn DEFAULT NULL,
-	upto_nchanges int DEFAULT 1000,
-	VARIADIC options text[] DEFAULT '{}'::text[]
+	upto_nchanges int,
+	table_names text[],
+	-- we need a batch size to avoid creating arrays that are too large
+	-- which would then cause this function to fail
+	batch_size int DEFAULT 250
 ) RETURNS VOID AS $$
 BEGIN
 	PERFORM (
 		WITH changes AS (
 			SELECT
-				s.id,
 				s.pgmb_queue_name as queue_name,
-				convert_to(to_jsonb(ARRAY_AGG(cs))::varchar, 'utf-8') AS data
+				s.id as id,
+				to_jsonb(cs) AS cs_json,
+				ROW_NUMBER() OVER () as rn
 			FROM postgraphile_meta.get_changes(
-				slot_name, upto_lsn, upto_nchanges, VARIADIC options
+				slot_name, upto_nchanges, table_names
 			) AS cs
 			INNER JOIN postgraphile_meta.subscriptions s ON
 				s.topic = cs.op_topic
@@ -227,22 +239,22 @@ BEGIN
 						AND cs.diff ?| s.diff_only_fields
 					)
 				)
-			GROUP BY s.id
 		),
 		grouped_changes AS (
 			SELECT
 				queue_name,
-				ARRAY_AGG(
-					(
-						data,
-						jsonb_object(ARRAY['subscriptionId'], ARRAY[id]),
-						NULL
-					)::pgmb.enqueue_msg
-				) AS records
+				(
+					convert_to((jsonb_agg(cs_json ORDER BY rn))::varchar, 'utf-8'),
+					jsonb_build_object('subscriptionId', id),
+					NULL
+				)::pgmb.enqueue_msg as record
 			FROM changes
-			GROUP BY queue_name
+			GROUP BY queue_name, id, CEIL(rn / batch_size)::int
 		)
-		SELECT ARRAY(SELECT * FROM pgmb.send(queue_name, records)) FROM grouped_changes
+		SELECT COUNT(*)
+		FROM grouped_changes
+		CROSS JOIN pgmb.send(queue_name, ARRAY[record])
+		WHERE queue_name IS NOT NULL
 	);
 END
 $$ LANGUAGE plpgsql PARALLEL SAFE;

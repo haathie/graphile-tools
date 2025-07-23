@@ -76,7 +76,7 @@ export class CreateSubscriptionStep extends Step<any> {
 					additionalData: {
 						inputCondition: args?.condition,
 					},
-					diffOnlyFields: this.#kind === 'update'
+					diffOnlyFields: this.#kind === 'U'
 						? Array.from(this.diffOnlyFields)
 						: undefined,
 				}
@@ -91,7 +91,7 @@ export class CreateSubscriptionStep extends Step<any> {
 			DEBUG(
 				`Created subscription ${row.id}, on topic ${row.topic}`
 				+ (
-					this.#kind === 'update'
+					this.#kind === 'U'
 						? `, fields: ${Array.from(this.diffOnlyFields).join(',') || 'all'}`
 						: ''
 				)

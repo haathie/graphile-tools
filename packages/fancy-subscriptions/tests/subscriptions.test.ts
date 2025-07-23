@@ -1,4 +1,4 @@
-import { type BootedGraphileServer, runDdlAndBoot, runSqlFile } from '@haathie/postgraphile-common-utils/tests'
+import { type BootedGraphileServer, getSuperuserPool, runDdlAndBoot, runSqlFile } from '@haathie/postgraphile-common-utils/tests'
 import { createClient } from 'graphql-ws'
 import assert from 'node:assert'
 import { after, before, describe, it } from 'node:test'
@@ -317,6 +317,71 @@ describe('Fancy Subscriptions', () => {
 			assert.ok(item, `Book with rowId ${book.rowId} not found in items`)
 			assert.strictEqual(item.title, book.title)
 			assert.strictEqual(item.author, book.author)
+		}
+	})
+
+	it.only('should handle large payloads', async() => {
+		const iter = client.iterate(
+			{
+				query: CREATE_SUB_QL,
+				variables: { creatorId: TEST_USER_ID }
+			},
+		)
+		const expectedItems = 1500
+		const waitForAllDone = loopTillAllChangesDone()
+
+		// will attempt to create a massive WAL entry, > 1gb
+		// this should not break the logical decoding
+		const pool = getSuperuserPool(CONFIG.preset)
+		const conn = await pool.connect()
+		try {
+			await conn.query('BEGIN')
+			await conn.query(`SET app.user_id = '${TEST_USER_ID}'`)
+
+			// create a large book
+			const largeTitle = 'A'.repeat(1_000_000) // 1 MB
+			await conn.query(
+				`INSERT INTO subs_test.books (title, author)
+				SELECT
+					$1, 'Author ' || i::varchar
+				FROM generate_series(1, ${expectedItems}) AS i`,
+				[largeTitle]
+			)
+
+			await conn.query('COMMIT')
+		} catch(err) {
+			await conn.query('ROLLBACK')
+			throw err
+		} finally {
+			conn.release()
+		}
+
+		console.log('inserted all data')
+
+		await waitForAllDone
+
+		async function loopTillAllChangesDone() {
+			let itemsDone = 0
+			for await (const item of iter) {
+				if(!item?.data) {
+					continue
+				}
+
+				const { booksCreated: { items } } = item.data as any
+				itemsDone += items.length
+				console.log(`Received ${itemsDone} items so far`)
+				if(itemsDone >= expectedItems) {
+					break
+				}
+			}
+
+			if(itemsDone < expectedItems) {
+				throw new Error(
+					`Expected ${expectedItems} items, but got only ${itemsDone}`
+				)
+			}
+
+			console.log(`Received all ${itemsDone} items`)
 		}
 	})
 })
