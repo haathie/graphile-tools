@@ -90,8 +90,6 @@ export const FancySubscriptionsPlugin: GraphileConfig.Plugin = {
 
 				const src = LDSSource.init({
 					pool: superuserPool,
-					// will populate later
-					tablePatterns: [],
 					deviceId: deviceId,
 					sleepDurationMs: pollIntervalMs
 				})

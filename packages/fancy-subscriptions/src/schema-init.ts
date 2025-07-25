@@ -23,7 +23,7 @@ export const schemaInitHook: Hook = (init, build) => {
 
 		const pgInfo = resource.codec.extensions!.pg!
 
-		subSrc.tablePatterns.push(`${pgInfo.schemaName}.${pgInfo.name}`)
+		subSrc.addTableToPublishFor(`"${pgInfo.schemaName}"."${pgInfo.name}"`)
 
 		registerPkType(resource, build)
 

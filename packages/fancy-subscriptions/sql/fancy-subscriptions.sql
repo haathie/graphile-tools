@@ -17,18 +17,6 @@ SELECT pgmb.assert_queue(
 	queue_type := 'logged'::pgmb.queue_type
 );
 
-CREATE TYPE postgraphile_meta.change_info AS (
-	lsn pg_lsn,
-	op varchar(16), -- 'insert', 'update', 'delete'
-	op_table varchar(64), -- table name
-	op_schema varchar(64), -- schema name
-	op_topic varchar(255),
-	row_before jsonb, -- the old state of the row (only for updates)
-	row_data jsonb, -- the current state of the row
-		-- (after for inserts, updates & before for deletes)
-	diff jsonb -- the difference between row_after & row_before. For updates only
-);
-
 -- Unique ID of the device that's connected to the database.
 -- Could be hostname, or just the pid
 CREATE OR REPLACE FUNCTION postgraphile_meta.get_session_device_id()
@@ -41,6 +29,17 @@ CREATE OR REPLACE FUNCTION postgraphile_meta.get_tmp_queue_name(
 ) RETURNS VARCHAR AS $$
 	SELECT 'postg_tmp_sub_' || device_id
 $$ LANGUAGE sql IMMUTABLE STRICT PARALLEL SAFE SECURITY DEFINER;
+
+-- Function to get the topic from a wal2json single change JSON
+CREATE OR REPLACE FUNCTION postgraphile_meta.create_topic(
+	schema_name varchar(64),
+	table_name varchar(64),
+	kind varchar(16)
+) RETURNS varchar(255) AS $$
+BEGIN
+	RETURN schema_name || '.' || table_name || '.' || kind;
+END
+$$ LANGUAGE plpgsql IMMUTABLE STRICT PARALLEL SAFE;
 
 CREATE TABLE IF NOT EXISTS postgraphile_meta.active_queues(
 	name VARCHAR(64) PRIMARY KEY,
@@ -75,6 +74,21 @@ CREATE TABLE IF NOT EXISTS postgraphile_meta.subscriptions (
 	additional_data JSONB DEFAULT '{}'::jsonb
 );
 
+CREATE TABLE IF NOT EXISTS postgraphile_meta.events(
+	id varchar(24) PRIMARY KEY,
+	table_name varchar(64) NOT NULL,
+	schema_name varchar(64) NOT NULL,
+	op varchar(16) NOT NULL, -- 'INSERT', 'UPDATE', 'DELETE'
+	topic varchar(255) NOT NULL GENERATED ALWAYS AS (
+		-- topic is a combination of table, schema and action
+		postgraphile_meta.create_topic(schema_name, table_name, op)
+	) STORED,
+	row_before jsonb, -- the old state of the row (only for updates)
+	row_data jsonb, -- the current state of the row
+		-- (after for inserts, updates & before for deletes)
+	diff jsonb -- the difference between row_after & row_before. For updates only
+);
+
 CREATE INDEX IF NOT EXISTS idx_subscriptions_topic
 	ON postgraphile_meta.subscriptions USING hash (topic);
 CREATE INDEX IF NOT EXISTS idx_subscriptions_queue_name
@@ -101,10 +115,128 @@ BEFORE INSERT ON postgraphile_meta.subscriptions
 FOR EACH ROW
 EXECUTE FUNCTION postgraphile_meta.populate_queue_name();
 
+CREATE OR REPLACE FUNCTION postgraphile_meta.push_for_subscriptions()
+RETURNS TRIGGER AS $$
+BEGIN
+	IF TG_OP = 'INSERT' THEN
+		INSERT INTO postgraphile_meta.events(
+			id,
+			table_name,
+			schema_name,
+			op,
+			row_data
+		)
+		SELECT
+			pgmb.create_message_id(),
+			TG_TABLE_NAME,
+			TG_TABLE_SCHEMA,
+			TG_OP,
+			to_jsonb(n)
+		FROM NEW n;
+	ELSIF TG_OP = 'DELETE' THEN
+		INSERT INTO postgraphile_meta.events(
+			id,
+			table_name,
+			schema_name,
+			op,
+			row_data
+		)
+		SELECT
+			pgmb.create_message_id(),
+			TG_TABLE_NAME,
+			TG_TABLE_SCHEMA,
+			TG_OP,
+			to_jsonb(o)
+		FROM OLD o;
+	ELSIF TG_OP = 'UPDATE' THEN
+		-- For updates, we can send both old and new data
+		INSERT INTO postgraphile_meta.events(
+			id,
+			table_name,
+			schema_name,
+			op,
+			row_data,
+			row_before,
+			diff
+		)
+		SELECT
+			pgmb.create_message_id(),
+			TG_TABLE_NAME,
+			TG_TABLE_SCHEMA,
+			TG_OP,
+			n.data,
+			o.data,
+			postgraphile_meta.jsonb_diff(n.data, o.data)
+		FROM (
+			SELECT to_jsonb(n) as data, row_number() OVER () AS rn FROM NEW n
+		) AS n
+		INNER JOIN (
+			SELECT to_jsonb(o) as data, row_number() OVER () AS rn FROM OLD o
+		) AS o ON n.rn = o.rn;
+	END IF;
+
+	RETURN NULL;
+END
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+CREATE OR REPLACE FUNCTION postgraphile_meta.make_subscribable(
+	tbl regclass
+)
+RETURNS VOID AS $$
+BEGIN
+	-- Create a trigger to push changes to the subscriptions queue
+	BEGIN
+		EXECUTE 'CREATE TRIGGER
+			postg_on_insert
+			AFTER INSERT ON ' || tbl::varchar || '
+			REFERENCING NEW TABLE AS NEW
+			FOR EACH STATEMENT
+			EXECUTE FUNCTION postgraphile_meta.push_for_subscriptions();';
+	EXCEPTION
+		WHEN duplicate_object THEN
+			NULL;
+  END;
+	BEGIN
+		EXECUTE 'CREATE TRIGGER
+			postg_on_delete
+			AFTER DELETE ON ' || tbl::varchar || '
+			REFERENCING OLD TABLE AS OLD
+			FOR EACH STATEMENT
+			EXECUTE FUNCTION postgraphile_meta.push_for_subscriptions();';
+	EXCEPTION
+		WHEN duplicate_object THEN
+			NULL;
+  END;
+	BEGIN
+		EXECUTE 'CREATE TRIGGER
+			postg_on_update
+			AFTER UPDATE ON ' || tbl::varchar || '
+			REFERENCING OLD TABLE AS OLD
+			NEW TABLE AS NEW
+			FOR EACH STATEMENT
+			EXECUTE FUNCTION postgraphile_meta.push_for_subscriptions();';
+	EXCEPTION
+		WHEN duplicate_object THEN
+			NULL;
+  END;
+END
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+CREATE OR REPLACE FUNCTION postgraphile_meta.remove_subscribable(
+	tbl regclass
+) RETURNS VOID AS $$
+BEGIN
+	-- Remove the triggers for the table
+	EXECUTE 'DROP TRIGGER IF EXISTS postg_on_insert ON ' || tbl::varchar || ';';
+	EXECUTE 'DROP TRIGGER IF EXISTS postg_on_delete ON ' || tbl::varchar || ';';
+	EXECUTE 'DROP TRIGGER IF EXISTS postg_on_update ON ' || tbl::varchar || ';';
+END
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
 -- Function to check if a subscription should receive a change
 CREATE OR REPLACE FUNCTION postgraphile_meta.should_subscription_recv_change(
 	sub postgraphile_meta.subscriptions,
-	cs postgraphile_meta.change_info
+	cs postgraphile_meta.events
 )
 RETURNS BOOLEAN AS $$
 DECLARE
@@ -137,97 +269,36 @@ SELECT jsonb_object_agg(key, value) FROM (
 )
 $$ LANGUAGE sql IMMUTABLE STRICT PARALLEL SAFE;
 
--- Function to get the topic from a wal2json single change JSON
-CREATE OR REPLACE FUNCTION postgraphile_meta.create_topic(
-	schema_name varchar(64),
-	table_name varchar(64),
-	kind varchar(16)
-) RETURNS varchar(255) AS $$
-BEGIN
-	RETURN schema_name || '.' || table_name || '.' || kind;
-END
-$$ LANGUAGE plpgsql IMMUTABLE STRICT PARALLEL SAFE;
-
-CREATE OR REPLACE FUNCTION postgraphile_meta.get_changes(
-	slot_name name,
-	upto_nchanges int,
-	table_names text[]
-) RETURNS SETOF postgraphile_meta.change_info AS $$
-	SELECT
-		(
-			cs.lsn,
-			data->>'action',
-			data->>'table',
-			data->>'schema',
-			-- topic is a combination of table, schema and action
-			postgraphile_meta.create_topic(
-				data->>'schema',
-				data->>'table',
-				data->>'action'
-			),
-			-- before
-			CASE
-				WHEN data->>'action' = 'U' THEN before.item
-			END,
-			-- data
-			CASE
-				WHEN data->>'action' IN ('I', 'U')
-					THEN after.item
-				WHEN data->>'action' = 'D'
-					THEN before.item
-				ELSE NULL
-			END,
-			-- diff
-			CASE
-				WHEN data->>'action' = 'U'
-					THEN postgraphile_meta.jsonb_diff(after.item, before.item)
-			END
-		)
-	FROM (
-		SELECT lsn, data::jsonb as data
-		FROM pg_catalog.pg_logical_slot_peek_changes(
-			slot_name, null, upto_nchanges,
-			'add-tables', array_to_string(table_names, ','),
-			'format-version', '2',
-			'include-types', 'false',
-			'actions', 'insert,update,delete',
-			'include-transaction', 'false'
-		)
-	) AS cs
-	CROSS JOIN LATERAL (
-		SELECT jsonb_object_agg(elem->>'name', elem->'value')
-		FROM jsonb_array_elements(data->'columns') as elem
-	) as after(item)
-	CROSS JOIN LATERAL (
-		SELECT jsonb_object_agg(elem->>'name', elem->'value')
-		FROM jsonb_array_elements(data->'identity') as elem
-	) as before(item);
-$$ LANGUAGE sql VOLATILE;
-
 -- Function to send changes to match & send changes to relevant subscriptions
 CREATE OR REPLACE FUNCTION postgraphile_meta.send_changes_to_subscriptions(
-	slot_name name,
-	upto_nchanges int,
-	table_names text[],
 	-- we need a batch size to avoid creating arrays that are too large
 	-- which would then cause this function to fail
 	batch_size int DEFAULT 250
 ) RETURNS VOID AS $$
+DECLARE
+	changed_count INT;
 BEGIN
-	PERFORM (
-		WITH changes AS (
+	WITH events_to_sync AS (
+			DELETE FROM postgraphile_meta.events
+			WHERE id IN (
+				SELECT id
+				FROM postgraphile_meta.events
+				ORDER BY id ASC
+				LIMIT batch_size
+			)
+			RETURNING *
+		),
+		changes AS (
 			SELECT
 				s.pgmb_queue_name as queue_name,
 				s.id as id,
-				to_jsonb(cs) AS cs_json,
-				ROW_NUMBER() OVER () as rn
-			FROM postgraphile_meta.get_changes(
-				slot_name, upto_nchanges, table_names
-			) AS cs
+				to_jsonb(cs) AS cs_json
+			FROM events_to_sync AS cs
 			INNER JOIN postgraphile_meta.subscriptions s ON
-				s.topic = cs.op_topic
+				s.topic = cs.topic
 				AND (
 					s.conditions_sql IS NULL
+					-- s.conditions_params[1] = cs.row_data->>'org_id'
 					OR postgraphile_meta.should_subscription_recv_change(s, cs)
 				)
 				AND (
@@ -244,18 +315,18 @@ BEGIN
 			SELECT
 				queue_name,
 				(
-					convert_to((jsonb_agg(cs_json ORDER BY rn))::varchar, 'utf-8'),
+					convert_to((jsonb_agg(cs_json))::varchar, 'utf-8'),
 					jsonb_build_object('subscriptionId', id),
 					NULL
 				)::pgmb.enqueue_msg as record
 			FROM changes
-			GROUP BY queue_name, id, CEIL(rn / batch_size)::int
+			GROUP BY queue_name, id
 		)
 		SELECT COUNT(*)
+		INTO changed_count
 		FROM grouped_changes
 		CROSS JOIN pgmb.send(queue_name, ARRAY[record])
-		WHERE queue_name IS NOT NULL
-	);
+		WHERE queue_name IS NOT NULL;
 END
 $$ LANGUAGE plpgsql PARALLEL SAFE;
 

@@ -72,7 +72,7 @@ export const schemaFieldsHook: Hook = (
 						type: createdType,
 						args: subsArgs,
 						description: `Subscription for new ${resource.name} items`,
-						subscribePlan: createSubscriptionPlan(resource, 'I', build),
+						subscribePlan: createSubscriptionPlan(resource, 'INSERT', build),
 						plan: p => p
 					})
 				),
@@ -86,7 +86,7 @@ export const schemaFieldsHook: Hook = (
 						type: deletedType,
 						args: subsArgs,
 						description: `Subscription for deleted ${resource.name} items`,
-						subscribePlan: createSubscriptionPlan(resource, 'D', build),
+						subscribePlan: createSubscriptionPlan(resource, 'DELETE', build),
 						plan: p => p
 					})
 				),
@@ -100,7 +100,7 @@ export const schemaFieldsHook: Hook = (
 						type: updatedType,
 						args: subsArgs,
 						description: `Subscription for updated ${resource.name} items`,
-						subscribePlan: createSubscriptionPlan(resource, 'U', build),
+						subscribePlan: createSubscriptionPlan(resource, 'UPDATE', build),
 						plan: p => p
 					})
 				)

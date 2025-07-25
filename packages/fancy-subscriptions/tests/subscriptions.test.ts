@@ -3,6 +3,7 @@ import { createClient } from 'graphql-ws'
 import assert from 'node:assert'
 import { after, before, describe, it } from 'node:test'
 import { setTimeout } from 'node:timers/promises'
+import { LDSSource } from '../src/lds.ts'
 import { CONFIG } from './config.ts'
 
 const TEST_USER_ID = 'test-user'
@@ -62,7 +63,10 @@ describe('Fancy Subscriptions', () => {
 	let client: ReturnType<typeof createClient>
 
 	before(async() => {
-		await runSqlFile(CONFIG.preset, 'packages/fancy-subscriptions/sql/fancy-subscriptions.sql')
+		await runSqlFile(
+			CONFIG.preset,
+			'packages/fancy-subscriptions/sql/fancy-subscriptions.sql'
+		)
 		srv = await runDdlAndBoot(CONFIG)
 
 		wsUrl = `ws://localhost:${srv.port}/graphql`
@@ -73,6 +77,8 @@ describe('Fancy Subscriptions', () => {
 				'x-user-id': TEST_USER_ID
 			},
 		})
+
+		await LDSSource.current.publishChanges()
 	})
 
 	after(async() => {
@@ -320,7 +326,7 @@ describe('Fancy Subscriptions', () => {
 		}
 	})
 
-	it.only('should handle large payloads', async() => {
+	it('should handle large payloads', async() => {
 		const iter = client.iterate(
 			{
 				query: CREATE_SUB_QL,

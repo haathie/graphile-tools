@@ -1,5 +1,5 @@
 import { JSONSerialiser, PGMBClient, type PGMBOnMessageOpts } from '@haathie/pgmb'
-import { Pool, type PoolClient } from 'pg'
+import { Pool } from 'pg'
 import { PassThrough, type Writable } from 'stream'
 import { setTimeout } from 'timers/promises'
 import { DEBUG } from './utils.ts'
@@ -9,7 +9,6 @@ type LDSSourceOptions = {
 	deviceId: string
 
 	slotName?: string
-	tablePatterns?: string[]
 	/**
 	 * Time to sleep for between publishing changes.
 	 * @default 500
@@ -24,7 +23,7 @@ export type PgChangeEvent = {
 	items: PgChangeData[]
 }
 
-export type PgChangeOp = 'I' | 'U' | 'D'
+export type PgChangeOp = 'INSERT' | 'UPDATE' | 'DELETE'
 
 export type PgChangeData = {
 	lsn: string
@@ -57,8 +56,7 @@ export class LDSSource {
 
 	slotName: string
 	deviceId: string
-	tablePatterns: string[]
-	chunkSize = 250
+	chunkSize = 10_000
 	sleepDurationMs: number
 
 	#pool: Pool
@@ -68,18 +66,16 @@ export class LDSSource {
 	#consumerPromise?: Promise<void>
 	#publishLoopPromise?: Promise<void>
 	#devicePingInterval?: NodeJS.Timeout
-	#publishClient: PoolClient | undefined
+	#pendingTablesToPublishFor: string[] = []
 
 	constructor({
 		pool,
 		deviceId,
 		slotName = 'postgraphile',
-		tablePatterns = ['*.*'],
-		sleepDurationMs = 500
+		sleepDurationMs = 250
 	}: LDSSourceOptions) {
 		this.deviceId = deviceId
 		this.slotName = slotName
-		this.tablePatterns = tablePatterns
 		this.sleepDurationMs = sleepDurationMs
 		this.#pool = pool
 		this.#pgmb = new PGMBClient<DataMap, DataMap>({
@@ -93,9 +89,12 @@ export class LDSSource {
 				}
 			]
 		})
+	}
 
-		this.#onClientRemove = this.#onClientRemove.bind(this)
-		this.#pool.on('remove', this.#onClientRemove)
+	addTableToPublishFor(tableName: string) {
+		if(!this.#pendingTablesToPublishFor.includes(tableName)) {
+			this.#pendingTablesToPublishFor.push(tableName)
+		}
 	}
 
 	async listen() {
@@ -258,48 +257,48 @@ export class LDSSource {
 		}
 	}
 
-	async startPublishChangeLoop() {
-		await this.createPublisherSlot()
+	startPublishChangeLoop() {
 		this.#loopPublishChanges()
 	}
 
 	async publishChanges() {
-		this.#publishClient ||= await this.#pool.connect()
-		try {
-			await this.#publishClient.query(
-				`SELECT FROM postgraphile_meta.send_changes_to_subscriptions(
-					$1, $2, $3::text[]
-				)`,
-				[this.slotName, this.chunkSize, this.tablePatterns]
-			)
-		} catch(err: any) {
-			if(err.code === '55006') {
-				// this error means that the slot is already in use by
-				// another session. Can ignore this
-				return
-			}
-
-			throw err
+		if(this.#pendingTablesToPublishFor?.length) {
+			const tableNames = [...this.#pendingTablesToPublishFor]
+			this.#pendingTablesToPublishFor = []
+			await this.makeSubscribable(...tableNames)
 		}
+
+		const now = Date.now()
+		await this.#pool.query(
+			'SELECT FROM postgraphile_meta.send_changes_to_subscriptions($1)',
+			[this.chunkSize]
+		)
+
+		console.log(
+			`Published changes for ${this.chunkSize} items in `
+			+ `${Date.now() - now}ms`
+		)
 	}
 
-	async createPublisherSlot() {
+	async makeSubscribable(...tableNames: string[]) {
+		const conn = await this.#pool.connect()
 		try {
-			await this.#pool.query(
-				"SELECT pg_catalog.pg_create_logical_replication_slot($1, 'wal2json', $2)",
-				[this.slotName, false]
-			)
-		} catch(e: any) {
-			if(e.code === '58P01') {
-				throw new Error(
-					"Couldn't create replication slot, "
-					+ "seems you don't have wal2json installed?"
+			await conn.query('BEGIN')
+			for(const tableName of tableNames) {
+				await conn.query(
+					'SELECT postgraphile_meta.make_subscribable($1::regclass)',
+					[tableName]
 				)
-			} else if(e.code === '42710') {
-				return // Slot already exists, no need to create it
 			}
 
-			throw e
+			await conn.query('COMMIT')
+
+			DEBUG(`Made tables subscribable: ${tableNames.join(', ')}`)
+		} catch(err) {
+			await conn.query('ROLLBACK')
+			throw err
+		} finally {
+			conn.release()
 		}
 	}
 
@@ -313,13 +312,6 @@ export class LDSSource {
 		if(LDSSource.#current === this) {
 			LDSSource.#current = undefined
 		}
-
-		if(this.#publishClient) {
-			await this.#publishClient.release()
-			this.#publishClient = undefined
-		}
-
-		this.#pool.off('remove', this.#onClientRemove)
 
 		clearInterval(this.#devicePingInterval)
 		for(const stream of Object.values(this.#subscribers)) {
@@ -348,17 +340,11 @@ export class LDSSource {
 		)
 	}
 
-	#onClientRemove = (client: PoolClient) => {
-		if(this.#publishClient === client) {
-			this.#publishClient = undefined
-			console.log('Publish client removed, resetting.')
-		}
-	}
-
 	async #handleMessage({
 		msgs,
 		logger
 	}: PGMBOnMessageOpts<string, DataMap, PgChangeData[]>) {
+		DEBUG(`Got ${msgs.length} messages, on ${this.deviceId}`)
 		for(const { id, headers, message } of msgs) {
 			const { subscriptionId } = headers
 			if(!subscriptionId) {
