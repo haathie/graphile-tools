@@ -100,12 +100,12 @@ ALTER TABLE app.contacts REPLICA IDENTITY FULL;
 
 comment on table app.contacts is $$
 @behaviour +subscribable
-@rateLimits connection:unauthenticated:5/60s connection:authenticated:5/60s
+@rateLimits connection:unauthenticated:5/60s connection:authenticated:100/60s
 $$;
 
 comment on column app.contacts.created_at is $$
 @behaviour filterType:range filterMethod:paradedb
-@rateLimits field:authenticated:3/60s
+@rateLimits field:authenticated:100/60s
 $$;
 
 comment on column app.contacts.id is $$

@@ -76,7 +76,7 @@ const preset: GraphileConfig.Preset = {
 		websockets: true,
 		maxRequestLength: 1_000_000
 	},
-	grafast: { explain: true },
+	// grafast: { explain: true },
 	schema: {
 		dontSwallowErrors: true,
 		defaultBehavior: '-single',
@@ -89,7 +89,7 @@ const preset: GraphileConfig.Preset = {
 			addRateLimitsToDescription: true,
 			rateLimitsConfig: {
 				authenticated: {
-					default: { max: 10, durationS: 60 },
+					default: { max: 100, durationS: 60 },
 					getRateLimitingKey({ pgSettings }) {
 						return pgSettings?.['app.org_id']
 					},
