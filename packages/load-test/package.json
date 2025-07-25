@@ -1,4 +1,12 @@
 {
 	"name": "@haathie/load-test",
-	"type": "module"
+	"type": "module",
+	"scripts": {
+		"load:test:muts-search": "K6_WEB_DASHBOARD=true k6 run src/script.js",
+		"load:test:subs": "K6_WEB_DASHBOARD=true k6 run src/subs.js"
+	},
+	"dependencies": {
+		"@types/k6": "^1.1.1",
+		"graphql-ws": "^6.0.6"
+	}
 }

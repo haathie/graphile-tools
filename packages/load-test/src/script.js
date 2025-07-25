@@ -1,4 +1,4 @@
-import { check, sleep } from 'k6'
+import { check } from 'k6'
 import http from 'k6/http'
 
 const GRAPH_QL_URL = 'http://localhost:5678/graphql'
@@ -6,7 +6,7 @@ const GRAPH_QL_URL = 'http://localhost:5678/graphql'
 const UPSERT_TAGS_GQL = `
 mutation TagsCreate($items: [TagsCreateItem!]!) {
   createTags(
-    input: {items: $items, onConflict: DoNothing}
+    items: $items, onConflict: DoNothing
   ) {
     items {
 			rowId
@@ -18,13 +18,13 @@ mutation TagsCreate($items: [TagsCreateItem!]!) {
 const UPSERT_CONTACTS_GQL = `
 mutation ContactsCreate($items: [ContactsCreateItem!]!) {
   createContacts(
-    input: {items: $items, onConflict: Replace}
+    items: $items, onConflict: Replace
   ) {
     items {
       updatedAt
 			type
-			teamId
-			tags {
+			orgId
+			contactTags {
 				nodes {
 					tag {
 						rowId
@@ -70,14 +70,14 @@ fragment ContactFragment on Contact {
   name
   createdAt
   createdBy
-  teamId
+  orgId
   assignee
   assignedBy
   assignedAt
   fullImg {
     url
   }
-  tags {
+  contactTags {
     nodes {
       tag {
         name
@@ -121,7 +121,6 @@ export default function() {
 	)
 	check(tagsRes, { 'tags 200': (res) => res.status === 200 })
 	const { data: { createTags: { items: createdTags } } } = tagsRes.json()
-	sleep(1)
 
 	const contacts = Array
 		.from({ length: CONTACTS_PER_TENANT }, createRandomContact)
@@ -137,8 +136,6 @@ export default function() {
 	)
 	check(contactsRes, { 'contacts 200': (res) => res.status === 200 })
 
-	sleep(1)
-
 	const firstContact = contacts[0]
 	const searchRes = http.post(
 		GRAPH_QL_URL,
@@ -153,16 +150,20 @@ export default function() {
 	check(searchRes, { 'search 200': (res) => res.status === 200 })
 
 	function createRandomContact() {
-		const tagsToMake = Math.floor(Math.random() * TAGS_PER_CONTACT)
+		const tagsToMake = (randomInt() % TAGS_PER_CONTACT)
 		const tagIdsToMake = Array.from({ length: tagsToMake }, () => (
-			createdTags[Math.floor(Math.random() * createdTags.length)].rowId
+			createdTags[randomInt() % createdTags.length].rowId
 		))
 		return {
-			name: `Contact ${Math.floor(Math.random() * 100000)}`,
-			phoneNumber: Math.random() > 0.5
-				? Math.random().toString().slice(2, 12)
+			name: `Contact ${randomInt()}`,
+			phoneNumber: randomInt() % 2 === 0
+				? randomInt()
 				: null,
-			tags: Array.from(new Set(tagIdsToMake)).map(tagId => ({ tagId }))
+			contactTags: Array.from(new Set(tagIdsToMake)).map(tagId => ({ tagId }))
 		}
 	}
+}
+
+function randomInt() {
+	return Math.floor(Math.random() * 100000000) % Date.now()
 }
