@@ -37,7 +37,6 @@ export const FancySubscriptionsPlugin: GraphileConfig.Plugin = {
 						pgServices = [],
 						subscriptions: {
 							deviceId,
-							publishChanges,
 							pollIntervalMs
 						} = {}
 					}
@@ -95,11 +94,6 @@ export const FancySubscriptionsPlugin: GraphileConfig.Plugin = {
 				})
 				await src.listen()
 				DEBUG('Subscriptions source initialized.')
-
-				if(publishChanges) {
-					await src.startPublishChangeLoop()
-					DEBUG('Publish change loop started.')
-				}
 
 				return next()
 			}

@@ -1,4 +1,3 @@
-import { JSONSerialiser, PGMBClient, type PGMBOnMessageOpts } from '@haathie/pgmb'
 import { Pool } from 'pg'
 import { PassThrough, type Writable } from 'stream'
 import { setTimeout } from 'timers/promises'
@@ -26,9 +25,9 @@ export type PgChangeEvent = {
 export type PgChangeOp = 'INSERT' | 'UPDATE' | 'DELETE'
 
 export type PgChangeData = {
-	lsn: string
+	id: string
 	op: PgChangeOp
-	op_topic: string
+	topic: string
 	row_before: Row | null
 	row_data: Row
 	diff: Row | null
@@ -48,23 +47,19 @@ export type CreateSubscriptionOpts = {
 	diffOnlyFields?: string[]
 }
 
-type DataMap = { [_: string]: PgChangeData[] }
-
 export class LDSSource {
 
 	static #current: LDSSource | undefined
 
 	slotName: string
 	deviceId: string
-	chunkSize = 10_000
+	chunkSize = 1000
 	sleepDurationMs: number
 
 	#pool: Pool
-	#pgmb: PGMBClient<DataMap, DataMap>
 	#closed = false
 	#subscribers: { [topic: string]: Writable } = {}
-	#consumerPromise?: Promise<void>
-	#publishLoopPromise?: Promise<void>
+	#readLoopPromise?: Promise<void>
 	#devicePingInterval?: NodeJS.Timeout
 	#pendingTablesToPublishFor: string[] = []
 
@@ -78,17 +73,6 @@ export class LDSSource {
 		this.slotName = slotName
 		this.sleepDurationMs = sleepDurationMs
 		this.#pool = pool
-		this.#pgmb = new PGMBClient<DataMap, DataMap>({
-			pool: this.#pool,
-			serialiser: JSONSerialiser,
-			consumers: [
-				{
-					name: getQueueNameFromDeviceId(deviceId),
-					batchSize: this.chunkSize,
-					onMessage: this.#handleMessage.bind(this),
-				}
-			]
-		})
 	}
 
 	addTableToPublishFor(tableName: string) {
@@ -98,26 +82,10 @@ export class LDSSource {
 	}
 
 	async listen() {
-		if(!this.#consumerPromise) {
-			this.#consumerPromise = this.#listen()
-				.catch(err => {
-					this.#consumerPromise = undefined
-					throw err
-				})
-		}
-
-		return this.#consumerPromise
-	}
-
-	async #listen() {
-		// remove all temp subscribers from previous runs
-		await this.#pool.query(
-			'SELECT postgraphile_meta.remove_stale_subscriptions($1)',
-			[this.deviceId]
-		)
 		await this.#pingDevice()
-		await this.#pgmb.listen()
+		this.#readLoopPromise ||= this.#startReadLoop()
 
+		clearInterval(this.#devicePingInterval)
 		this.#devicePingInterval = setInterval(async() => {
 			try {
 				await this.#pingDevice()
@@ -140,6 +108,10 @@ export class LDSSource {
 	) {
 		const values: string[] = []
 		const params: unknown[] = []
+
+		params.push(this.deviceId)
+		values.push(`$${params.length}::varchar`)
+
 		if(typeof topic === 'string') {
 			params.push(topic)
 			values.push(`$${params.length}`)
@@ -182,6 +154,7 @@ export class LDSSource {
 		values.push(`$${params.length}::jsonb`)
 
 		const sql = `INSERT INTO postgraphile_meta.subscriptions(
+			worker_device_id,
 			topic,
 			conditions_sql,
 			conditions_params,
@@ -257,29 +230,6 @@ export class LDSSource {
 		}
 	}
 
-	startPublishChangeLoop() {
-		this.#loopPublishChanges()
-	}
-
-	async publishChanges() {
-		if(this.#pendingTablesToPublishFor?.length) {
-			const tableNames = [...this.#pendingTablesToPublishFor]
-			this.#pendingTablesToPublishFor = []
-			await this.makeSubscribable(...tableNames)
-		}
-
-		const now = Date.now()
-		await this.#pool.query(
-			'SELECT FROM postgraphile_meta.send_changes_to_subscriptions($1)',
-			[this.chunkSize]
-		)
-
-		console.log(
-			`Published changes for ${this.chunkSize} items in `
-			+ `${Date.now() - now}ms`
-		)
-	}
-
 	async makeSubscribable(...tableNames: string[]) {
 		const conn = await this.#pool.connect()
 		try {
@@ -302,6 +252,54 @@ export class LDSSource {
 		}
 	}
 
+	async readChanges() {
+		if(this.#pendingTablesToPublishFor?.length) {
+			const tableNames = [...this.#pendingTablesToPublishFor]
+			this.#pendingTablesToPublishFor = []
+			await this.makeSubscribable(...tableNames)
+		}
+
+		const now = Date.now()
+		const { rows } = await this.#pool.query(
+			'SELECT * FROM postgraphile_meta.get_events_for_subscriptions($1, $2)',
+			[this.deviceId, this.chunkSize]
+		)
+
+		const subToEventMap: { [subscriptionId: string]: PgChangeData[] } = {}
+		for(const { subscription_ids: subIds, ...row } of rows) {
+			for(const subId of subIds) {
+				subToEventMap[subId] ||= []
+				subToEventMap[subId].push(row as PgChangeData)
+			}
+		}
+
+		await Promise.all(
+			Object.entries(subToEventMap).map(async([subId, items]) => {
+				const stream = this.#subscribers[subId]
+				if(!stream) {
+					DEBUG(`No stream found for subscriptionId: ${subId}`)
+					return
+				}
+
+				await new Promise<void>((resolve, reject) => {
+					const msg: PgChangeEvent = { eventId: items.at(-1)!.id, items }
+					stream.write(msg, err => {
+						if(err) {
+							reject(err)
+						} else {
+							resolve()
+						}
+					})
+				})
+			})
+		)
+
+		console.log(
+			`Published changes for ${this.chunkSize} items in `
+			+ `${Date.now() - now}ms`
+		)
+	}
+
 	release() {
 		return this.close()
 	}
@@ -318,14 +316,13 @@ export class LDSSource {
 			stream.end()
 		}
 
-		await this.#publishLoopPromise
-		await this.#pgmb.close()
+		await this.#readLoopPromise
 	}
 
-	async #loopPublishChanges() {
+	async #startReadLoop() {
 		while(!this.#closed) {
 			try {
-				await this.publishChanges()
+				await this.readChanges()
 				await setTimeout(this.sleepDurationMs)
 			} catch(e: any) {
 				console.error('Error publishing changes:', e)
@@ -338,40 +335,6 @@ export class LDSSource {
 			'SELECT postgraphile_meta.mark_device_queue_active($1::varchar)',
 			[this.deviceId]
 		)
-	}
-
-	async #handleMessage({
-		msgs,
-		logger
-	}: PGMBOnMessageOpts<string, DataMap, PgChangeData[]>) {
-		DEBUG(`Got ${msgs.length} messages, on ${this.deviceId}`)
-		for(const { id, headers, message } of msgs) {
-			const { subscriptionId } = headers
-			if(!subscriptionId) {
-				logger.warn({ id, headers }, 'msg w/o subscriptionId')
-				continue
-			}
-
-			const stream = this.#subscribers[subscriptionId]
-			if(!stream) {
-				logger.warn(
-					{ id, subscriptionId },
-					'no listeners for subscriptionId'
-				)
-				continue
-			}
-
-			await new Promise<void>((resolve, reject) => {
-				const msg: PgChangeEvent = { eventId: id, items: message }
-				stream.write(msg, err => {
-					if(err) {
-						reject(err)
-					} else {
-						resolve()
-					}
-				})
-			})
-		}
 	}
 
 	static init(options: LDSSourceOptions): LDSSource {
@@ -396,9 +359,4 @@ export class LDSSource {
 
 		return LDSSource.#current
 	}
-}
-
-// duplicated from sql
-function getQueueNameFromDeviceId(deviceId: string): string {
-	return `postg_tmp_sub_${deviceId}`
 }

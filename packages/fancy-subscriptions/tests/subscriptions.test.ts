@@ -78,7 +78,7 @@ describe('Fancy Subscriptions', () => {
 			},
 		})
 
-		await LDSSource.current.publishChanges()
+		await LDSSource.current.readChanges()
 	})
 
 	after(async() => {
@@ -105,6 +105,8 @@ describe('Fancy Subscriptions', () => {
 
 		const nextValue = iterator.next()
 
+		await setTimeout(500)
+
 		// create a book
 		const { createBook: { book } } = await srv.graphqlRequest<any>({
 			query: CREATE_QL,
@@ -126,6 +128,16 @@ describe('Fancy Subscriptions', () => {
 		// the subscription but isn't in the mutation response
 		assert.strictEqual(items[0].rowId, book.rowId)
 
+		const nextValueOg = iterator.next()
+
+		it('should not receive another event', async() => {
+			const rslt = await Promise.race([
+				nextValueOg,
+				setTimeout(1000).then(() => 'did not trigger')
+			])
+			assert.strictEqual(rslt, 'did not trigger')
+		})
+
 		// check that a mutation on another creator's book doesn't trigger the subscription
 		it('should not trigger subscription for other users', async() => {
 			const userId2 = 'another-user'
@@ -137,7 +149,6 @@ describe('Fancy Subscriptions', () => {
 			})
 
 			const nextValue2 = iterate2.next()
-			const nextValueOg = iterator.next()
 
 			// create a book for another user
 			await srv.graphqlRequest<any>({
