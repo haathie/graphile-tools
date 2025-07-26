@@ -1,4 +1,4 @@
-import { PgResource } from 'postgraphile/@dataplan/pg'
+import type { PgCodecWithAttributes, PgResource } from 'postgraphile/@dataplan/pg'
 import { type ExecutionDetails, type ExecutionResults, Step } from 'postgraphile/grafast'
 import { type SQL, sql } from 'postgraphile/pg-sql2'
 import { LDSSource, type PgChangeOp } from './lds.ts'
@@ -50,18 +50,19 @@ export class CreateSubscriptionStep extends Step<any> {
 		return indexMap(async(i) => {
 			const cond = values[this.#whereBuilderDepId].at(i) as SQL | undefined
 			const args = values[this.#inputArgsDepId].at(i)
-			const sampleJson = '{}'
-			const alias = sql`t`
 			const compiledSql = cond
-				? sql.compile(
-					sql`select 1
-						from jsonb_populate_record(
-							null::${this.#resource.from as SQL},
-							${sql.value(sampleJson)}::jsonb
-						) ${alias} WHERE ${cond}`
-				)
+				? sql.compile(cond)
 				: undefined
 			const pgInfo = this.#resource.codec.extensions?.pg!
+
+			const conditionsSql = compiledSql
+				? replaceSqlWithJsonConversions(
+					replaceParamsWithConditionParams(compiledSql.text),
+					't',
+					this.#resource.codec as PgCodecWithAttributes
+				)
+				: undefined
+
 			const [text, params] = this.#subSrc.getCreateSubscriptionSql(
 				{
 					topic: {
@@ -69,13 +70,11 @@ export class CreateSubscriptionStep extends Step<any> {
 						table: pgInfo.name,
 						kind: this.#kind
 					},
-					conditionsSql: compiledSql?.text,
+					conditionsSql,
 					// 1st param is just a placeholder
-					conditionsParams: compiledSql?.values?.slice(1),
+					conditionsParams: compiledSql?.values,
 					type: 'websocket',
-					additionalData: {
-						inputCondition: args?.condition,
-					},
+					additionalData: { inputCondition: args?.condition },
 					diffOnlyFields: this.#kind === 'UPDATE'
 						? Array.from(this.diffOnlyFields)
 						: undefined,
@@ -99,4 +98,43 @@ export class CreateSubscriptionStep extends Step<any> {
 			return this.#subSrc.subscribe(row.id, true)
 		})
 	}
+}
+
+/**
+ * When using subscriptions, we don't have the actual SQL type of the record
+ * so we convert the JSONB values to the expected SQL type.
+ * Eg. the normal query 't."some_field" = $1::varchar' would become
+ * "((e->'row_data'->'some_field')::varchar) = $1::varchar"
+ */
+function replaceSqlWithJsonConversions(
+	sql: string,
+	sqlAlias: string,
+	codec: PgCodecWithAttributes
+) {
+	return sql.replace(
+		new RegExp(`${sqlAlias}\\."([^"]+)"`, 'gm'),
+		(value, attr) => {
+			const attrCodec = codec.attributes[attr]
+			if(!attrCodec) {
+				throw new Error(`Attribute ${attr} not found in codec`)
+			}
+
+			const sqlType = 'varchar' //attrCodec.codec.sqlType
+			return `((e.row_data->>'${attr}')::${sqlType})`
+		}
+	)
+}
+
+/**
+ * In subscriptions, params passed to the sql are stored in the
+ * "conditions_params" column as an array.
+ * This function replaces the params in the SQL with the actual values
+ * from the "conditions_params" column.
+ * Eg. the normal query 't."some_field" = $1::varchar' would
+ * become "t."some_field" = (s.conditions_params[1])::varchar"
+ * where 0 is the index of the param in the array.
+ */
+function replaceParamsWithConditionParams(sql: string) {
+	return sql
+		.replace(/\$([0-9]+)/gm, (_, index) => `(s.conditions_params[${index}])`)
 }

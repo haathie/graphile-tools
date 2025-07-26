@@ -53,7 +53,7 @@ export class LDSSource {
 
 	slotName: string
 	deviceId: string
-	chunkSize = 1000
+	chunkSize = 250
 	sleepDurationMs: number
 
 	#pool: Pool
@@ -109,9 +109,6 @@ export class LDSSource {
 		const values: string[] = []
 		const params: unknown[] = []
 
-		params.push(this.deviceId)
-		values.push(`$${params.length}::varchar`)
-
 		if(typeof topic === 'string') {
 			params.push(topic)
 			values.push(`$${params.length}`)
@@ -154,7 +151,6 @@ export class LDSSource {
 		values.push(`$${params.length}::jsonb`)
 
 		const sql = `INSERT INTO postgraphile_meta.subscriptions(
-			worker_device_id,
 			topic,
 			conditions_sql,
 			conditions_params,
@@ -298,6 +294,8 @@ export class LDSSource {
 			`Published changes for ${this.chunkSize} items in `
 			+ `${Date.now() - now}ms`
 		)
+
+		return rows.length
 	}
 
 	release() {
@@ -321,11 +319,20 @@ export class LDSSource {
 
 	async #startReadLoop() {
 		while(!this.#closed) {
+			let rowsRead = 0
 			try {
-				await this.readChanges()
-				await setTimeout(this.sleepDurationMs)
+				rowsRead = await this.readChanges()
+				if(rowsRead) {
+					DEBUG(`Read ${rowsRead} events from db`)
+				}
 			} catch(e: any) {
-				console.error('Error publishing changes:', e)
+				console.error('Error reading changes:', e)
+			}
+
+			// nothing to read, wait before next iteration
+			if(!rowsRead) {
+				await setTimeout(this.sleepDurationMs)
+				continue
 			}
 		}
 	}

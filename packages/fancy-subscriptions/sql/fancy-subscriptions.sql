@@ -67,10 +67,8 @@ CREATE TABLE IF NOT EXISTS postgraphile_meta.subscriptions (
 	additional_data JSONB DEFAULT '{}'::jsonb
 );
 
-CREATE INDEX IF NOT EXISTS idx_subscriptions_topic
-	ON postgraphile_meta.subscriptions USING hash (topic);
-CREATE INDEX IF NOT EXISTS idx_subscriptions_queue_name
-	ON postgraphile_meta.subscriptions USING hash (worker_device_id);
+CREATE INDEX IF NOT EXISTS idx_subs_device_conds_topic
+	ON postgraphile_meta.subscriptions(worker_device_id, conditions_sql, topic);
 
 ALTER TABLE postgraphile_meta.subscriptions ENABLE ROW LEVEL SECURITY;
 
@@ -268,6 +266,43 @@ SELECT jsonb_object_agg(key, value) FROM (
 )
 $$ LANGUAGE sql IMMUTABLE STRICT PARALLEL SAFE;
 
+CREATE OR REPLACE FUNCTION postgraphile_meta.get_events_for_subscriptions_by_filter(
+	filter_txt TEXT,
+	device_id VARCHAR(64),
+	batch_size INT DEFAULT 250
+)
+RETURNS TABLE(
+	id varchar(24),
+	topic varchar(128),
+	row_data jsonb,
+	row_before jsonb,
+	diff jsonb,
+	subscription_ids varchar(64)[]
+) AS $$
+BEGIN
+	RETURN QUERY EXECUTE '
+		SELECT
+			e.id, e.topic, e.row_data, e.row_before, e.diff, ARRAY_AGG(s.id)
+		FROM postgraphile_meta.subscriptions s
+		INNER JOIN postgraphile_meta.events e ON (
+			s.conditions_sql = $1 AND s.topic = e.topic AND e.id > s.cursor
+			AND ' || filter_txt || '
+			AND (
+				s.diff_only_fields IS NULL
+				OR (
+					e.diff IS NOT NULL
+					AND e.diff ?| s.diff_only_fields
+				)
+			)
+		)
+		WHERE s.worker_device_id = $2
+		GROUP BY e.id, e.topic, e.row_data, e.row_before, e.diff
+		ORDER BY e.id ASC
+		LIMIT $3'
+		USING filter_txt, device_id, batch_size;
+END
+$$ LANGUAGE plpgsql PARALLEL SAFE;
+
 -- Function to send changes to match & send changes to relevant subscriptions
 CREATE OR REPLACE FUNCTION postgraphile_meta.get_events_for_subscriptions(
 	device_name VARCHAR(64),
@@ -284,41 +319,25 @@ CREATE OR REPLACE FUNCTION postgraphile_meta.get_events_for_subscriptions(
 ) AS $$
 BEGIN
 	RETURN QUERY (
-		WITH relevant_events AS (
-			SELECT s.id as sub_id, e.*
+		WITH relevant_sqls AS (
+			SELECT conditions_sql
 			FROM postgraphile_meta.subscriptions s
-			INNER JOIN postgraphile_meta.events e ON (
-				s.topic = e.topic AND e.id > s.cursor
-				AND (
-					s.conditions_sql IS NULL
-					-- s.conditions_params[1] = cs.row_data->>'org_id'
-					OR postgraphile_meta.should_subscription_recv_change(s, e)
-				)
-				AND (
-					s.diff_only_fields IS NULL
-					OR (
-						e.diff IS NOT NULL
-						-- if diff_only_fields is not null, then we check if the diff
-						-- has at least one of the fields in the diff_only_fields array
-						AND e.diff ?| s.diff_only_fields
-					)
-				)
-			)
-			WHERE worker_device_id = device_name
-			ORDER BY e.id ASC
-			LIMIT batch_size
+			WHERE s.worker_device_id = device_name
+			GROUP BY conditions_sql
+		),
+		result AS (
+			SELECT e.*
+			FROM relevant_sqls s
+			CROSS JOIN postgraphile_meta.get_events_for_subscriptions_by_filter(
+				s.conditions_sql, device_name, batch_size
+			) e
 		),
 		updated_subs AS (
 			UPDATE postgraphile_meta.subscriptions s
-			SET cursor = (SELECT MAX(r.id) FROM relevant_events r)
-			FROM relevant_events r
-			WHERE s.id = r.sub_id
+			SET cursor = (SELECT MAX(r.id) FROM result r)
+			WHERE s.id IN (SELECT DISTINCT unnest(r.subscription_ids) FROM result r)
 		)
-		SELECT
-			r.id, r.topic, r.row_data, r.row_before, r.diff,
-			array_agg(r.sub_id) AS subscription_ids
-		FROM relevant_events r
-		GROUP BY r.id, r.topic, r.row_data, r.row_before, r.diff
+		SELECT * FROM result
 	);
 END
 $$ LANGUAGE plpgsql;
