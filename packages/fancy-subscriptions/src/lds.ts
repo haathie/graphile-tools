@@ -13,6 +13,8 @@ type LDSSourceOptions = {
 	 * @default 500
 	 */
 	sleepDurationMs?: number
+
+	chunkSize?: number
 }
 
 type Row = { [_: string]: unknown }
@@ -53,7 +55,7 @@ export class LDSSource {
 
 	slotName: string
 	deviceId: string
-	chunkSize = 250
+	chunkSize: number
 	sleepDurationMs: number
 
 	#pool: Pool
@@ -67,12 +69,14 @@ export class LDSSource {
 		pool,
 		deviceId,
 		slotName = 'postgraphile',
-		sleepDurationMs = 250
+		sleepDurationMs = 250,
+		chunkSize = 1000
 	}: LDSSourceOptions) {
 		this.deviceId = deviceId
 		this.slotName = slotName
 		this.sleepDurationMs = sleepDurationMs
 		this.#pool = pool
+		this.chunkSize = chunkSize
 	}
 
 	addTableToPublishFor(tableName: string) {
@@ -212,8 +216,7 @@ export class LDSSource {
 			if(deleteOnClose) {
 				try {
 					await this.#pool.query(
-						'DELETE FROM postgraphile_meta.subscriptions'
-						+ ' WHERE id = $1',
+						'DELETE FROM postgraphile_meta.subscriptions WHERE id = $1',
 						[subscriptionId]
 					)
 					DEBUG(`Deleted subscription: ${subscriptionId}`)
@@ -269,8 +272,9 @@ export class LDSSource {
 			}
 		}
 
+		const subs = Object.entries(subToEventMap)
 		await Promise.all(
-			Object.entries(subToEventMap).map(async([subId, items]) => {
+			subs.map(async([subId, items]) => {
 				const stream = this.#subscribers[subId]
 				if(!stream) {
 					DEBUG(`No stream found for subscriptionId: ${subId}`)
@@ -291,8 +295,8 @@ export class LDSSource {
 		)
 
 		console.log(
-			`Published changes for ${this.chunkSize} items in `
-			+ `${Date.now() - now}ms`
+			`Read ${rows.length} events from db to ${subs.length} subs in`
+			+ ` ${Date.now() - now}ms`
 		)
 
 		return rows.length
@@ -322,9 +326,6 @@ export class LDSSource {
 			let rowsRead = 0
 			try {
 				rowsRead = await this.readChanges()
-				if(rowsRead) {
-					DEBUG(`Read ${rowsRead} events from db`)
-				}
 			} catch(e: any) {
 				console.error('Error reading changes:', e)
 			}

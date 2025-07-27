@@ -37,6 +37,7 @@ export const FancySubscriptionsPlugin: GraphileConfig.Plugin = {
 						pgServices = [],
 						subscriptions: {
 							deviceId,
+							readChunkSize,
 							pollIntervalMs
 						} = {}
 					}
@@ -90,7 +91,8 @@ export const FancySubscriptionsPlugin: GraphileConfig.Plugin = {
 				const src = LDSSource.init({
 					pool: superuserPool,
 					deviceId: deviceId,
-					sleepDurationMs: pollIntervalMs
+					sleepDurationMs: pollIntervalMs,
+					chunkSize: readChunkSize,
 				})
 				await src.listen()
 				DEBUG('Subscriptions source initialized.')

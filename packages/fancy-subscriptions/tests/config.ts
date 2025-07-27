@@ -45,8 +45,8 @@ export const CONFIG: TestGraphileConfig = {
 		grafserv: { websockets: true },
 		subscriptions: {
 			deviceId: process.env.DEVICE_ID!,
-			publishChanges: true,
 			pollIntervalMs: 750,
+			readChunkSize: 500
 		},
 		pgServices: [
 			makePgService({

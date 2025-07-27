@@ -7,7 +7,7 @@ declare global {
 		interface Preset {
 			subscriptions?: {
 				deviceId: string
-				publishChanges?: boolean
+				readChunkSize?: number
 				pollIntervalMs?: number
 			}
 		}

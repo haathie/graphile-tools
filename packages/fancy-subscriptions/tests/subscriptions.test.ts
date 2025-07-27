@@ -3,6 +3,7 @@ import { createClient } from 'graphql-ws'
 import assert from 'node:assert'
 import { after, before, describe, it } from 'node:test'
 import { setTimeout } from 'node:timers/promises'
+import type { PoolClient } from 'pg'
 import { LDSSource } from '../src/lds.ts'
 import { CONFIG } from './config.ts'
 
@@ -130,7 +131,7 @@ describe('Fancy Subscriptions', () => {
 
 		const nextValueOg = iterator.next()
 
-		it('should not receive another event', async() => {
+		await it('should not receive another event', async() => {
 			const rslt = await Promise.race([
 				nextValueOg,
 				setTimeout(1000).then(() => 'did not trigger')
@@ -139,16 +140,16 @@ describe('Fancy Subscriptions', () => {
 		})
 
 		// check that a mutation on another creator's book doesn't trigger the subscription
-		it('should not trigger subscription for other users', async() => {
+		await it('should not trigger subscription for other users', async() => {
 			const userId2 = 'another-user'
-			const iterate2 = client.iterate({
+			const iterator2 = client.iterate({
 				query: CREATE_SUB_QL,
 				variables: {
 					creatorId: userId2
 				}
 			})
 
-			const nextValue2 = iterate2.next()
+			const nextValue2 = iterator2.next()
 
 			// create a book for another user
 			await srv.graphqlRequest<any>({
@@ -171,7 +172,7 @@ describe('Fancy Subscriptions', () => {
 			])
 			assert.strictEqual(ogSub, 'did not trigger')
 
-			await iterate2.return?.()
+			await iterator2.return?.()
 			await iterator.return?.()
 		})
 	})
@@ -299,6 +300,77 @@ describe('Fancy Subscriptions', () => {
 			items,
 			[{ rowId: book.rowId }]
 		)
+
+		await iterator.return?.()
+	})
+
+	it('should not miss events when reading changes', async() => {
+		const creatorId = 'test-user-missed-events'
+		const iterator = client.iterate({
+			query: CREATE_SUB_QL,
+			variables: { creatorId }
+		})
+
+		const eventsPromise = readChanges()
+
+		// we'll make two txs, the first one will be committed last
+		// to test the edge case that if the first tx is committed
+		// after the second one, it should still be read correctly
+		const tx1 = tx(async client => {
+			await client.query(
+				`INSERT INTO subs_test.books (title, author, creator_id)
+				VALUES
+					('Test Book RC 1', 'Author RC 1', $1),
+					('Test Book RC 2', 'Author RC 2', $1)`,
+				[creatorId]
+			)
+
+			// wait longer than the next read loop execution
+			await setTimeout(2000)
+		})
+
+		await setTimeout(100)
+
+		// tx2, started after tx1, but committed first
+		await tx(async client => {
+			await client.query(
+				`INSERT INTO subs_test.books (title, author, creator_id)
+				VALUES ('Test Book RC 3', 'Author RC 3', $1)`,
+				[creatorId]
+			)
+		})
+
+		await tx1
+
+		// wait for events to be read
+		await setTimeout(1000)
+
+		await iterator.return?.()
+
+		const rows = await eventsPromise
+		assert.strictEqual(rows.length, 3)
+		assert.partialDeepStrictEqual(
+			rows,
+			[
+				{ title: 'Test Book RC 1' },
+				{ title: 'Test Book RC 2' },
+				{ title: 'Test Book RC 3' }
+			]
+		)
+
+		async function readChanges() {
+			const events: any[] = []
+			for await (const item of iterator) {
+				if(!item?.data) {
+					continue
+				}
+
+				const { booksCreated: { items } } = item.data as any
+				events.push(...items)
+			}
+
+			return events
+		}
 	})
 
 	it('should correctly batch events', async() => {
@@ -402,3 +474,21 @@ describe('Fancy Subscriptions', () => {
 		}
 	})
 })
+
+async function tx<T>(
+	exec: (client: PoolClient) => Promise<T>
+) {
+	const pool = getSuperuserPool(CONFIG.preset)
+	const client = await pool.connect()
+	await client.query('BEGIN;')
+	try {
+		const rslt = await exec(client)
+		await client.query('COMMIT;')
+		return rslt
+	} catch(err) {
+		await client.query('ROLLBACK;')
+		throw err
+	} finally {
+		client.release()
+	}
+}

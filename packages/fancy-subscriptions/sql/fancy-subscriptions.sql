@@ -1,28 +1,60 @@
 DROP SCHEMA IF EXISTS postgraphile_meta CASCADE; -- TODO: remove this in production
 CREATE SCHEMA IF NOT EXISTS "postgraphile_meta";
 
--- Check "pgmb" schema exists, otherwise raise exception
-DO $$
-BEGIN
-	IF NOT EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = 'pgmb') THEN
-		RAISE EXCEPTION 'pgmb extension is not installed. Please install it first.';
-	END IF;
-END
-$$;
-
--- Create the queue for permanent subscriptions
-SELECT pgmb.assert_queue(
-	'postg_permanent_subs',
-	default_headers := '{"contentType":"application/json"}'::jsonb,
-	queue_type := 'logged'::pgmb.queue_type
-);
-
 -- Unique ID of the device that's connected to the database.
 -- Could be hostname, or just the pid
 CREATE OR REPLACE FUNCTION postgraphile_meta.get_session_device_id()
 RETURNS VARCHAR AS $$
 	SELECT current_setting('app.device_id');
 $$ LANGUAGE sql IMMUTABLE STRICT PARALLEL SAFE SECURITY DEFINER;
+
+-- fn to create a random bigint. Used for message IDs
+-- copied from pgmb
+CREATE OR REPLACE FUNCTION postgraphile_meta.create_random_bigint()
+RETURNS BIGINT AS $$
+BEGIN
+	-- the message ID allows for 7 hex-bytes of randomness,
+	-- i.e. 28 bits of randomness. Thus, the max we allow is 2^28/2
+	-- i.e. 0xffffff8, which allows for batch inserts to increment the
+	-- randomness for up to another 2^28/2 messages (more than enough)
+	RETURN (random() * 0xffffff8)::BIGINT;
+END
+$$ LANGUAGE plpgsql VOLATILE PARALLEL SAFE;
+
+CREATE OR REPLACE FUNCTION postgraphile_meta.create_event_id(
+	ts timestamptz DEFAULT clock_timestamp(),
+	rand bigint DEFAULT postgraphile_meta.create_random_bigint()
+)
+RETURNS VARCHAR(24) AS $$
+BEGIN
+	RETURN substr(
+		'ps'
+		|| to_hex((extract(epoch from ts) * 1000000)::bigint)
+		|| to_hex(rand),
+		1,
+		24
+	);
+END
+$$ LANGUAGE plpgsql IMMUTABLE STRICT PARALLEL SAFE SECURITY DEFINER;
+
+-- we'll find the latest committed event ID that can be picked up safely
+-- in order to avoid missing events
+CREATE OR REPLACE FUNCTION postgraphile_meta.get_max_pickable_event_id()
+RETURNS VARCHAR(24) AS $$
+BEGIN
+	RETURN postgraphile_meta.create_event_id(
+		COALESCE(
+			(
+				SELECT MIN(xact_start)
+				FROM pg_stat_activity ps
+				WHERE ps.state
+					IN ('active', 'idle in transaction', 'idle in transaction (aborted)')
+			),
+			clock_timestamp()
+		)
+	);
+END
+$$ LANGUAGE plpgsql VOLATILE STRICT PARALLEL SAFE SECURITY DEFINER;
 
 -- Function to get the topic from a wal2json single change JSON
 CREATE OR REPLACE FUNCTION postgraphile_meta.create_topic(
@@ -37,6 +69,7 @@ $$ LANGUAGE plpgsql IMMUTABLE STRICT PARALLEL SAFE;
 
 CREATE TABLE IF NOT EXISTS postgraphile_meta.active_devices(
 	name VARCHAR(64) PRIMARY KEY,
+	latest_cursor VARCHAR(24) NOT NULL,
 	last_activity_at TIMESTAMPTZ DEFAULT NULL
 );
 
@@ -44,8 +77,7 @@ CREATE TABLE IF NOT EXISTS postgraphile_meta.subscriptions (
 	-- unique identifier for the subscription
 	id VARCHAR(48) PRIMARY KEY DEFAULT gen_random_uuid()::varchar,
 	created_at TIMESTAMPTZ DEFAULT NOW(),
-	worker_device_id VARCHAR(64) NOT NULL DEFAULT postgraphile_meta.get_session_device_id(), 
-	cursor VARCHAR(64),
+	worker_device_id VARCHAR(64) NOT NULL DEFAULT postgraphile_meta.get_session_device_id(),
 	topic VARCHAR(255) NOT NULL,
 	-- if conditions_sql is NULL, then the subscription will receive
 	-- all changes for the topic. Otherwise, it will receive only changes
@@ -72,27 +104,19 @@ CREATE INDEX IF NOT EXISTS idx_subs_device_conds_topic
 
 ALTER TABLE postgraphile_meta.subscriptions ENABLE ROW LEVEL SECURITY;
 
--- Create fn & trigger to populate the queue name to the permanent queue
--- if the subscription is not temporary and the queue name is not set
-CREATE OR REPLACE FUNCTION postgraphile_meta.populate_queue_name()
-RETURNS TRIGGER AS $$
-BEGIN
-	IF NEW.cursor IS NULL THEN
-		-- If the cursor is not set, then set it to the current time
-		NEW.cursor := COALESCE(
-			(SELECT MAX(id) FROM postgraphile_meta.events LIMIT 1),
-			pgmb.create_message_id()
-		);
-	END IF;
+-- -- Create fn & trigger to populate the queue name to the permanent queue
+-- -- if the subscription is not temporary and the queue name is not set
+-- CREATE OR REPLACE FUNCTION postgraphile_meta.populate_queue_name()
+-- RETURNS TRIGGER AS $$
+-- BEGIN
+-- 	RETURN NEW;
+-- END;
+-- $$ LANGUAGE plpgsql PARALLEL SAFE SECURITY DEFINER;
 
-	RETURN NEW;
-END;
-$$ LANGUAGE plpgsql PARALLEL SAFE SECURITY DEFINER;
-
-CREATE TRIGGER trg_populate_queue_name
-BEFORE INSERT ON postgraphile_meta.subscriptions
-FOR EACH ROW
-EXECUTE FUNCTION postgraphile_meta.populate_queue_name();
+-- CREATE TRIGGER trg_populate_queue_name
+-- BEFORE INSERT ON postgraphile_meta.subscriptions
+-- FOR EACH ROW
+-- EXECUTE FUNCTION postgraphile_meta.populate_queue_name();
 
 CREATE TABLE IF NOT EXISTS postgraphile_meta.events(
 	id varchar(24) PRIMARY KEY,
@@ -124,7 +148,7 @@ BEGIN
 			row_data
 		)
 		SELECT
-			pgmb.create_message_id(),
+			postgraphile_meta.create_event_id(),
 			TG_TABLE_NAME,
 			TG_TABLE_SCHEMA,
 			TG_OP,
@@ -139,7 +163,7 @@ BEGIN
 			row_data
 		)
 		SELECT
-			pgmb.create_message_id(),
+			postgraphile_meta.create_event_id(),
 			TG_TABLE_NAME,
 			TG_TABLE_SCHEMA,
 			TG_OP,
@@ -157,7 +181,7 @@ BEGIN
 			diff
 		)
 		SELECT
-			pgmb.create_message_id(),
+			postgraphile_meta.create_event_id(),
 			TG_TABLE_NAME,
 			TG_TABLE_SCHEMA,
 			TG_OP,
@@ -230,31 +254,6 @@ BEGIN
 END
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
--- Function to check if a subscription should receive a change
-CREATE OR REPLACE FUNCTION postgraphile_meta.should_subscription_recv_change(
-	sub postgraphile_meta.subscriptions,
-	cs postgraphile_meta.events
-)
-RETURNS BOOLEAN AS $$
-DECLARE
-	final_query TEXT := sub.conditions_sql;
-	-- We'll use before row data if available, as the person may receive the change
-	-- before the row is updated in the database.
-	row_data jsonb := COALESCE(cs.row_before, cs.row_data);
-	params TEXT[] := array_prepend(row_data::varchar, sub.conditions_params);
-	rslt BOOLEAN := false;
-BEGIN
-	-- loop through params and replace each occurrence of $1, $2, etc.
-	-- with $1[i] where i is the index of the parameter
-	FOR i IN 1 .. array_length(params, 1) LOOP
-		final_query := replace(final_query, '$' || i, '$1[' || i || ']');
-	END LOOP;
-
-	EXECUTE final_query INTO rslt USING params;
-	RETURN rslt;
-END
-$$ LANGUAGE plpgsql IMMUTABLE STRICT PARALLEL SAFE;
-
 -- Creates a function to compute the difference between two JSONB objects
 -- Treats 'null' values, and non-existent keys as equal
 CREATE OR REPLACE FUNCTION postgraphile_meta.jsonb_diff(a jsonb, b jsonb)
@@ -268,8 +267,7 @@ $$ LANGUAGE sql IMMUTABLE STRICT PARALLEL SAFE;
 
 CREATE OR REPLACE FUNCTION postgraphile_meta.get_events_for_subscriptions_by_filter(
 	filter_txt TEXT,
-	device_id VARCHAR(64),
-	batch_size INT DEFAULT 250
+	device_id VARCHAR(64)
 )
 RETURNS TABLE(
 	id varchar(24),
@@ -284,8 +282,8 @@ BEGIN
 		SELECT
 			e.id, e.topic, e.row_data, e.row_before, e.diff, ARRAY_AGG(s.id)
 		FROM postgraphile_meta.subscriptions s
-		INNER JOIN postgraphile_meta.events e ON (
-			s.conditions_sql = $1 AND s.topic = e.topic AND e.id > s.cursor
+		INNER JOIN tmp_events e ON (
+			s.conditions_sql = $1 AND s.topic = e.topic
 			AND ' || filter_txt || '
 			AND (
 				s.diff_only_fields IS NULL
@@ -297,9 +295,8 @@ BEGIN
 		)
 		WHERE s.worker_device_id = $2
 		GROUP BY e.id, e.topic, e.row_data, e.row_before, e.diff
-		ORDER BY e.id ASC
-		LIMIT $3'
-		USING filter_txt, device_id, batch_size;
+		ORDER BY e.id ASC'
+		USING filter_txt, device_id;
 END
 $$ LANGUAGE plpgsql PARALLEL SAFE;
 
@@ -318,6 +315,20 @@ CREATE OR REPLACE FUNCTION postgraphile_meta.get_events_for_subscriptions(
 	subscription_ids varchar(64)[]
 ) AS $$
 BEGIN
+	CREATE TEMP TABLE IF NOT EXISTS tmp_events
+		(LIKE postgraphile_meta.events INCLUDING DEFAULTS);
+
+	INSERT INTO tmp_events
+		SELECT e.*
+		FROM postgraphile_meta.events e
+		INNER JOIN postgraphile_meta.active_devices d ON d.name = device_name
+		WHERE e.id > d.latest_cursor
+			AND e.id < postgraphile_meta.get_max_pickable_event_id()
+		ORDER BY e.id ASC
+		LIMIT batch_size;
+
+	RAISE NOTICE 'Processing events %', postgraphile_meta.get_max_pickable_event_id();
+
 	RETURN QUERY (
 		WITH relevant_sqls AS (
 			SELECT conditions_sql
@@ -326,59 +337,54 @@ BEGIN
 			GROUP BY conditions_sql
 		),
 		result AS (
-			SELECT e.*
-			FROM relevant_sqls s
+			SELECT e.* FROM relevant_sqls s
 			CROSS JOIN postgraphile_meta.get_events_for_subscriptions_by_filter(
-				s.conditions_sql, device_name, batch_size
+				s.conditions_sql, device_name
 			) e
 		),
-		updated_subs AS (
-			UPDATE postgraphile_meta.subscriptions s
-			SET cursor = (SELECT MAX(r.id) FROM result r)
-			WHERE s.id IN (SELECT DISTINCT unnest(r.subscription_ids) FROM result r)
-		)
+		updated_active_devices AS (
+			UPDATE postgraphile_meta.active_devices d
+			SET latest_cursor = (SELECT MAX(e.id) FROM tmp_events e)
+			WHERE d.name = device_name
+				-- only update if we actually inserted some events
+				AND EXISTS (SELECT 1 FROM tmp_events LIMIT 1)
+		),
+		del_tmp_events AS (DELETE FROM tmp_events)
 		SELECT * FROM result
 	);
 END
 $$ LANGUAGE plpgsql;
 
 CREATE OR REPLACE FUNCTION postgraphile_meta.remove_all_stale_devices_and_subs()
-RETURNS RECORD AS $$
-DECLARE
-	que_del_count INT;
+RETURNS VOID AS $$
 BEGIN
-	PERFORM (
-		WITH deleted_queues AS (
-			DELETE FROM postgraphile_meta.active_devices
-			WHERE
-				last_activity_at < NOW() - INTERVAL '15 minutes'
-				OR last_activity_at IS NULL
-			RETURNING name
-		)
-		SELECT pgmb.delete_queue(name) FROM deleted_queues
-	);
-
-	RETURN que_del_count;
+	DELETE FROM postgraphile_meta.active_devices
+	WHERE last_activity_at < NOW() - INTERVAL '15 minutes'
+		OR last_activity_at IS NULL;
 END
-$$ LANGUAGE plpgsql PARALLEL SAFE;
+$$ LANGUAGE plpgsql;
 
 CREATE OR REPLACE FUNCTION postgraphile_meta.remove_stale_subscriptions(
 	device_id VARCHAR
 ) RETURNS VOID AS $$
 BEGIN
 	DELETE FROM postgraphile_meta.subscriptions
-	WHERE worker_device_id = device_id AND is_temporary = TRUE;
+	WHERE worker_device_id = device_id AND is_temporary;
 END
-$$ LANGUAGE plpgsql PARALLEL SAFE;
+$$ LANGUAGE plpgsql;
 
 CREATE OR REPLACE FUNCTION postgraphile_meta.mark_device_queue_active(
 	device_id VARCHAR(64)
 )
 RETURNS VOID AS $$
 BEGIN
-	INSERT INTO postgraphile_meta.active_devices(name, last_activity_at)
-	VALUES (device_id, NOW())
-	ON CONFLICT (name) DO UPDATE
-	SET last_activity_at = NOW();
+	INSERT INTO postgraphile_meta.active_devices
+		(name, latest_cursor, last_activity_at)
+	VALUES (
+		device_id,
+		postgraphile_meta.get_max_pickable_event_id(),
+		NOW()
+	)
+	ON CONFLICT (name) DO UPDATE SET last_activity_at = NOW();
 END
-$$ LANGUAGE plpgsql PARALLEL SAFE;
+$$ LANGUAGE plpgsql;

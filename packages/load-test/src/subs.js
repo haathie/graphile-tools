@@ -54,6 +54,7 @@ const SUB_QL = `subscription ContactsCreated($orgId: String!) {
 
 const TAGS_PER_TENANT = 3
 const TAGS_PER_CONTACT = 2
+const MAX_SUB_DELAY_MS = 5_000
 
 export const options = {
 	'scenarios': {
@@ -132,8 +133,8 @@ export default async function() {
 	const start = Date.now()
 	while(
 		msgReceived < contactsCreated
-		// timeout after 5 seconds
-		&& Date.now() - start < 5_000
+		// timeout after few s
+		&& Date.now() - start < MAX_SUB_DELAY_MS
 	) {
 		await sleep(100)
 	}
