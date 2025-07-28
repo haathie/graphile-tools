@@ -134,7 +134,7 @@ export default async function() {
 	while(
 		msgReceived < contactsCreated
 		// timeout after few s
-		&& Date.now() - start < MAX_SUB_DELAY_MS
+		&& (Date.now() - start) < MAX_SUB_DELAY_MS
 	) {
 		await sleep(100)
 	}
@@ -142,7 +142,7 @@ export default async function() {
 	ws.close()
 	check(msgReceived, { 'data received on sub': v => v === contactsCreated })
 
-	console.log('VU done, success: ', msgReceived === contactsCreated)
+	console.log('VU done, success: ', msgReceived, '=', contactsCreated)
 
 	function createRandomContact() {
 		const tagsToMake = randomInt() % TAGS_PER_CONTACT
