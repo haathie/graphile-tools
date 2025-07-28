@@ -53,6 +53,9 @@ export type CreateSubscriptionOpts = {
 	diffOnlyFields?: string[]
 }
 
+const PING_INTERVAL_MS = 30 * 1000 // 30 seconds
+const MAINTENANCE_INTERVAL_MS = 15 * 60 * 1000 // 15 minute
+
 export class SubscriptionManager {
 
 	static #current: SubscriptionManager | undefined
@@ -67,6 +70,7 @@ export class SubscriptionManager {
 	#subscribers: { [topic: string]: Writable } = {}
 	#readLoopPromise?: Promise<void>
 	#devicePingInterval?: NodeJS.Timeout
+	#maintenanceInterval?: NodeJS.Timeout
 	#pendingTablesToPublishFor: string[] = []
 	#eventsPublished = 0
 
@@ -118,7 +122,16 @@ export class SubscriptionManager {
 			} catch(e) {
 				console.error('Error pinging device queue:', e)
 			}
-		}, 30 * 1000) // every 30 seconds
+		}, PING_INTERVAL_MS) // every 30 seconds
+
+		clearInterval(this.#maintenanceInterval)
+		this.#maintenanceInterval = setInterval(async() => {
+			try {
+				await this.#maintainEventsTable()
+			} catch(e) {
+				console.error('Error maintaining events table:', e)
+			}
+		}, MAINTENANCE_INTERVAL_MS) // every minute
 	}
 
 	getCreateSubscriptionSql(
@@ -343,6 +356,7 @@ export class SubscriptionManager {
 		}
 
 		clearInterval(this.#devicePingInterval)
+		clearInterval(this.#maintenanceInterval)
 		for(const stream of Object.values(this.#subscribers)) {
 			stream.end()
 		}
@@ -374,6 +388,10 @@ export class SubscriptionManager {
 			'SELECT postgraphile_meta.mark_device_queue_active($1)',
 			[this.deviceId]
 		)
+	}
+
+	async #maintainEventsTable() {
+		await this.#pool.query('SELECT maintain_events_table()')
 	}
 
 	static init(options: SubscriptionManagerOptions): SubscriptionManager {

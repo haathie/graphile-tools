@@ -82,6 +82,30 @@ CREATE TABLE IF NOT EXISTS postgraphile_meta.active_devices(
 	last_activity_at TIMESTAMPTZ DEFAULT NULL
 );
 
+CREATE TYPE postgraphile_meta.config_type AS ENUM(
+	'oldest_partition_interval',
+	'future_partitions_to_create',
+	'partition_size'
+);
+
+CREATE TABLE IF NOT EXISTS postgraphile_meta.subscriptions_config(
+	-- unique identifier for the subscription config
+	id postgraphile_meta.config_type PRIMARY KEY,
+	value TEXT
+);
+
+CREATE OR REPLACE FUNCTION postgraphile_meta.get_config_value(
+	config_id postgraphile_meta.config_type
+) RETURNS TEXT AS $$
+	SELECT value FROM postgraphile_meta.subscriptions_config
+	WHERE id = config_id
+$$ LANGUAGE sql STRICT PARALLEL SAFE;
+
+INSERT INTO postgraphile_meta.subscriptions_config(id, value)
+	VALUES ('oldest_partition_interval', '2 hours'),
+		('future_partitions_to_create', '12'),
+		('partition_size', 'hour');
+
 CREATE TABLE IF NOT EXISTS postgraphile_meta.subscriptions (
 	-- unique identifier for the subscription
 	id VARCHAR(48) PRIMARY KEY DEFAULT gen_random_uuid()::varchar,
@@ -126,7 +150,7 @@ CREATE TABLE IF NOT EXISTS postgraphile_meta.events(
 	row_data jsonb, -- the current state of the row
 		-- (after for inserts, updates & before for deletes)
 	diff jsonb -- the difference between row_after & row_before. For updates only
-);
+) PARTITION BY RANGE (id);
 
 CREATE INDEX IF NOT EXISTS idx_events_topic_id
 	ON postgraphile_meta.events (topic, id);
@@ -376,3 +400,79 @@ RETURNS VOID AS $$
 	)
 	ON CONFLICT (name) DO UPDATE SET last_activity_at = NOW()
 $$ LANGUAGE sql;
+
+CREATE OR REPLACE FUNCTION postgraphile_meta.get_event_partition_name(
+	table_name TEXT,
+	ts timestamptz
+) RETURNS TEXT AS $$
+	SELECT table_name || '_' || to_char(ts, 'YYYYMMDDHH24')
+$$ LANGUAGE sql IMMUTABLE STRICT PARALLEL SAFE;
+
+-- Partition maintenance function for events table.
+-- Creates partitions for the current and next hour.
+-- Deletes partitions that are older than 2 hours.
+CREATE OR REPLACE FUNCTION postgraphile_meta.maintain_events_table(
+	current_ts timestamptz DEFAULT NOW()
+)
+RETURNS void AS $$
+DECLARE
+	schema_name TEXT := 'postgraphile_meta';
+	table_name TEXT := 'events';
+	partition_size TEXT := postgraphile_meta
+		.get_config_value('partition_size');
+	partition_interval INTERVAL := ('1 ' || partition_size);
+
+	oldest_partition_interval INTERVAL := postgraphile_meta
+		.get_config_value('oldest_partition_interval')::INTERVAL;
+	future_partitions_to_create INT := postgraphile_meta
+		.get_config_value('future_partitions_to_create')::INT;
+
+	lock_key BIGINT :=
+		hashtext(schema_name || '.' || table_name || '.maintain_events');
+
+	ts_trunc timestamptz := date_trunc(partition_size, current_ts);
+	p_info RECORD;
+BEGIN
+	IF NOT pg_try_advisory_lock(lock_key) THEN
+		-- If can't get lock, means another process is already maintaining the table
+		RETURN;
+	END IF;
+
+	-- Ensure current and next hour partitions exist
+	FOR i IN 0..future_partitions_to_create LOOP
+		DECLARE
+			target_ts timestamptz := ts_trunc + (i * partition_interval);
+		BEGIN
+			EXECUTE format(
+				'CREATE TABLE IF NOT EXISTS %I.%I PARTITION OF %I.%I
+					FOR VALUES FROM (%L) TO (%L)',
+				schema_name,
+				postgraphile_meta.get_event_partition_name(table_name, target_ts),
+				schema_name,
+				table_name,
+				postgraphile_meta.create_event_id(target_ts, 0),
+				postgraphile_meta.create_event_id(target_ts + partition_interval, 0)
+			);
+		END;
+	END LOOP;
+
+	-- Drop old partitions
+	FOR p_info IN (
+		SELECT relname FROM pg_class
+		WHERE
+			relname < postgraphile_meta.get_event_partition_name(
+				table_name, current_ts - oldest_partition_interval
+			)
+			AND relname LIKE (table_name || '_%')
+			AND relkind = 'r'
+			AND relnamespace = (SELECT oid FROM pg_namespace WHERE nspname = schema_name)
+	) LOOP
+		EXECUTE format('DROP TABLE IF EXISTS %I.%I', schema_name, p_info.relname);
+	END LOOP;
+
+	-- unlock the advisory lock
+	PERFORM pg_advisory_unlock(lock_key);
+END;
+$$ LANGUAGE plpgsql;
+
+SELECT postgraphile_meta.maintain_events_table();

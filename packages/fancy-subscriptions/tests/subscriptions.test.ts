@@ -55,7 +55,7 @@ const CREATE_SUB_QL = `subscription BooksCreated($creatorId: String!) {
 	}
 }`
 
-describe('Fancy Subscriptions', () => {
+describe('Subscriptions', () => {
 
 	let srv: BootedGraphileServer
 	let wsUrl: string
@@ -495,6 +495,34 @@ describe('Fancy Subscriptions', () => {
 
 			console.log(`Received all ${itemsDone} items`)
 		}
+	})
+
+	it('should delete older partitions', async() => {
+		const pool = getSuperuserPool(CONFIG.preset)
+		const { rows: existingParts } = await pool.query(
+			`SELECT relname FROM pg_class
+				WHERE relname LIKE 'events_%' AND relkind = 'r'
+				ORDER BY relname`
+		)
+
+		await pool.query(
+			"SELECT postgraphile_meta.maintain_events_table(NOW() + INTERVAL '3 hours')"
+		)
+
+		const { rows: newParts } = await pool.query(
+			`SELECT relname FROM pg_class
+				WHERE relname LIKE 'events_%' AND relkind = 'r'
+				ORDER BY relname`
+		)
+
+		assert.partialDeepStrictEqual(
+			newParts,
+			existingParts.slice(1),
+			'Should have deleted one partition'
+		)
+
+		// would've created new partitions
+		assert.ok(newParts.length > existingParts.length)
 	})
 })
 
