@@ -27,16 +27,14 @@ CREATE OR REPLACE FUNCTION postgraphile_meta.create_event_id(
 	rand bigint DEFAULT postgraphile_meta.create_random_bigint()
 )
 RETURNS VARCHAR(24) AS $$
-BEGIN
-	RETURN substr(
-		'ps'
-		|| to_hex((extract(epoch from ts) * 1000000)::bigint)
-		|| to_hex(rand),
-		1,
-		24
-	);
-END
-$$ LANGUAGE plpgsql IMMUTABLE STRICT PARALLEL SAFE SECURITY DEFINER;
+SELECT substr(
+	'ps'
+	|| to_hex((extract(epoch from ts) * 1000000)::bigint)
+	|| to_hex(rand),
+	1,
+	24
+)
+$$ LANGUAGE sql VOLATILE STRICT PARALLEL SAFE SECURITY DEFINER;
 
 -- get the earliest active tx start time for a table
 CREATE OR REPLACE FUNCTION postgraphile_meta.get_xact_start(
@@ -60,15 +58,13 @@ LANGUAGE sql VOLATILE STRICT PARALLEL SAFE SECURITY DEFINER;
 -- active tx  
 CREATE OR REPLACE FUNCTION postgraphile_meta.get_max_pickable_event_id()
 RETURNS VARCHAR(24) AS $$
-BEGIN
-	RETURN postgraphile_meta.create_event_id(
+	SELECT postgraphile_meta.create_event_id(
 		COALESCE(
 			postgraphile_meta.get_xact_start('postgraphile_meta', 'events'),
 			clock_timestamp()
 		)
-	);
-END
-$$ LANGUAGE plpgsql VOLATILE STRICT PARALLEL SAFE SECURITY DEFINER;
+	)
+$$ LANGUAGE sql VOLATILE STRICT PARALLEL SAFE SECURITY DEFINER;
 
 -- Function to get the topic from a wal2json single change JSON
 CREATE OR REPLACE FUNCTION postgraphile_meta.create_topic(
@@ -76,10 +72,8 @@ CREATE OR REPLACE FUNCTION postgraphile_meta.create_topic(
 	table_name varchar(64),
 	kind varchar(16)
 ) RETURNS varchar(255) AS $$
-BEGIN
-	RETURN schema_name || '.' || table_name || '.' || kind;
-END
-$$ LANGUAGE plpgsql IMMUTABLE STRICT PARALLEL SAFE;
+	SELECT (schema_name || '.' || table_name || '.' || kind)
+$$ LANGUAGE sql IMMUTABLE STRICT PARALLEL SAFE;
 
 CREATE TABLE IF NOT EXISTS postgraphile_meta.active_devices(
 	name VARCHAR(64) PRIMARY KEY,
@@ -363,17 +357,14 @@ $$ LANGUAGE plpgsql;
 CREATE OR REPLACE FUNCTION postgraphile_meta.remove_temp_subscriptions(
 	device_id VARCHAR
 ) RETURNS VOID AS $$
-BEGIN
 	DELETE FROM postgraphile_meta.subscriptions
-	WHERE worker_device_id = device_id AND is_temporary;
-END
-$$ LANGUAGE plpgsql;
+	WHERE worker_device_id = device_id AND is_temporary
+$$ LANGUAGE sql;
 
 CREATE OR REPLACE FUNCTION postgraphile_meta.mark_device_queue_active(
 	device_id VARCHAR(64)
 )
 RETURNS VOID AS $$
-BEGIN
 	INSERT INTO postgraphile_meta.active_devices
 		(name, latest_cursor, last_activity_at)
 	VALUES (
@@ -381,6 +372,5 @@ BEGIN
 		postgraphile_meta.get_max_pickable_event_id(),
 		NOW()
 	)
-	ON CONFLICT (name) DO UPDATE SET last_activity_at = NOW();
-END
-$$ LANGUAGE plpgsql;
+	ON CONFLICT (name) DO UPDATE SET last_activity_at = NOW()
+$$ LANGUAGE sql;
