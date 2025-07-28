@@ -383,10 +383,10 @@ describe('Fancy Subscriptions', () => {
 			variables: { creatorId: testUserId }
 		})
 
-		const nextValue = iterator.next()
+		const batchesTask = readChanges()
 
 		const books = await Promise.all(
-			Array.from({ length: 5 }).map(async(_, i) => {
+			Array.from({ length: 10 }).map(async(_, i) => {
 				const { createBook: { book } } = await srv.graphqlRequest<any>({
 					query: CREATE_QL,
 					variables: {
@@ -401,14 +401,34 @@ describe('Fancy Subscriptions', () => {
 			})
 		)
 
-		const rslt = await nextValue
-		const { value: { data: { booksCreated: { eventId, items } } } } = rslt
-		assert.ok(eventId)
+		await setTimeout(1000)
+
+		await iterator.return?.()
+
+		const batches = await batchesTask
+		// ensure books were received in batch sizes > 1
+		assert.ok(batches.length < books.length)
+		const batchesFlattened = batches.flat()
+
 		for(const book of books) {
-			const item = items.find((i: any) => i.rowId === book.rowId)
+			const item = batchesFlattened.find(i => i.rowId === book.rowId)
 			assert.ok(item, `Book with rowId ${book.rowId} not found in items`)
 			assert.strictEqual(item.title, book.title)
 			assert.strictEqual(item.author, book.author)
+		}
+
+		async function readChanges() {
+			const eventBatches: any[][] = []
+			for await (const item of iterator) {
+				if(!item?.data) {
+					continue
+				}
+
+				const { booksCreated: { items } } = item.data as any
+				eventBatches.push(items)
+			}
+
+			return eventBatches
 		}
 	})
 
