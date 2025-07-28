@@ -11,8 +11,8 @@
   ],
   "scripts": {
     "prepack": "npm run build",
-    "lint": "eslint ./src --ext .js,.ts,.jsx,.tsx",
-    "lint:fix": "eslint ./src --fix --ext .js,.ts,.jsx,.tsx",
+    "lint": "eslint packages/*/src --ext .js,.ts,.jsx,.tsx",
+    "lint:fix": "npm run lint -- --fix",
     "run-file": "sh scripts/run-with-env.sh",
     "test": "NODE_ENV=test sh scripts/run-with-env.sh --test",
     "test:only": "NODE_ENV=test sh scripts/run-with-env.sh --test-only",

@@ -4,7 +4,7 @@ import assert from 'node:assert'
 import { after, before, beforeEach, describe, it } from 'node:test'
 import { setTimeout } from 'node:timers/promises'
 import type { PoolClient } from 'pg'
-import { LDSSource } from '../src/lds.ts'
+import { SubscriptionManager } from '../src/manager.ts'
 import { CONFIG } from './config.ts'
 
 const CREATE_QL = `mutation CreateBook($input: BookInput!) {
@@ -79,7 +79,7 @@ describe('Fancy Subscriptions', () => {
 			},
 		})
 
-		await LDSSource.current.readChanges()
+		await SubscriptionManager.current.readChanges()
 	})
 
 	after(async() => {
@@ -376,7 +376,7 @@ describe('Fancy Subscriptions', () => {
 		}
 	})
 
-	it('should correctly batch events', async() => {
+	it.only('should correctly batch events', async() => {
 		// we'll test by creating multiple books
 		const iterator = client.iterate({
 			query: CREATE_SUB_QL,

@@ -5,7 +5,7 @@ import type { Pool } from 'pg'
 import type {} from 'postgraphile'
 import type { } from 'postgraphile/adaptors/pg'
 import { inflection } from './inflection.ts'
-import { LDSSource } from './lds.ts'
+import { SubscriptionManager } from './manager.ts'
 import { schemaFieldsHook } from './schema-fields.ts'
 import { schemaInitHook } from './schema-init.ts'
 import { DEBUG } from './utils.ts'
@@ -43,7 +43,7 @@ export const FancySubscriptionsPlugin: GraphileConfig.Plugin = {
 					}
 				}
 			) {
-				if(LDSSource.isCurrentInitialized) {
+				if(SubscriptionManager.isCurrentInitialized) {
 					return next()
 				}
 
@@ -72,9 +72,9 @@ export const FancySubscriptionsPlugin: GraphileConfig.Plugin = {
 					}
 
 					service.release = async(...args) => {
-						if(LDSSource.isCurrentInitialized) {
+						if(SubscriptionManager.isCurrentInitialized) {
 							DEBUG('Releasing subscriptions source...')
-							await LDSSource.current.release()
+							await SubscriptionManager.current.release()
 							DEBUG('Subscriptions source released.')
 						}
 
@@ -88,7 +88,7 @@ export const FancySubscriptionsPlugin: GraphileConfig.Plugin = {
 					throw new Error('No superuser pool found in preset.')
 				}
 
-				const src = LDSSource.init({
+				const src = SubscriptionManager.init({
 					pool: superuserPool,
 					deviceId: deviceId,
 					sleepDurationMs: pollIntervalMs,

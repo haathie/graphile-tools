@@ -1,8 +1,9 @@
 DROP SCHEMA IF EXISTS postgraphile_meta CASCADE; -- TODO: remove this in production
 CREATE SCHEMA IF NOT EXISTS "postgraphile_meta";
 
--- Unique ID of the device that's connected to the database.
--- Could be hostname, or just the pid
+-- Unique ID of the device/server that's connected to the database.
+-- Could be hostname, or some other unique identifier. Used to identify
+-- which subscriptions reside on which device.
 CREATE OR REPLACE FUNCTION postgraphile_meta.get_session_device_id()
 RETURNS VARCHAR AS $$
 	SELECT current_setting('app.device_id');
@@ -117,20 +118,6 @@ CREATE INDEX IF NOT EXISTS idx_subs_device_conds_topic
 
 ALTER TABLE postgraphile_meta.subscriptions ENABLE ROW LEVEL SECURITY;
 
--- -- Create fn & trigger to populate the queue name to the permanent queue
--- -- if the subscription is not temporary and the queue name is not set
--- CREATE OR REPLACE FUNCTION postgraphile_meta.populate_queue_name()
--- RETURNS TRIGGER AS $$
--- BEGIN
--- 	RETURN NEW;
--- END;
--- $$ LANGUAGE plpgsql PARALLEL SAFE SECURITY DEFINER;
-
--- CREATE TRIGGER trg_populate_queue_name
--- BEFORE INSERT ON postgraphile_meta.subscriptions
--- FOR EACH ROW
--- EXECUTE FUNCTION postgraphile_meta.populate_queue_name();
-
 CREATE TABLE IF NOT EXISTS postgraphile_meta.events(
 	id varchar(24) PRIMARY KEY,
 	table_name varchar(64) NOT NULL,
@@ -149,6 +136,7 @@ CREATE TABLE IF NOT EXISTS postgraphile_meta.events(
 CREATE INDEX IF NOT EXISTS idx_events_topic_id
 	ON postgraphile_meta.events (topic, id);
 
+-- Trigger that pushes changes to the events table
 CREATE OR REPLACE FUNCTION postgraphile_meta.push_for_subscriptions()
 RETURNS TRIGGER AS $$
 DECLARE
@@ -163,9 +151,7 @@ BEGIN
 			row_data
 		)
 		SELECT
-			postgraphile_meta.create_event_id(
-				rand := start_num + row_number() OVER ()
-			),
+			postgraphile_meta.create_event_id(rand := start_num + row_number() OVER ()),
 			TG_TABLE_NAME,
 			TG_TABLE_SCHEMA,
 			TG_OP,
@@ -219,6 +205,8 @@ BEGIN
 END
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
+-- Makes the specified table subscribable. I.e attach triggers to it
+-- that push changes to the events table.
 CREATE OR REPLACE FUNCTION postgraphile_meta.make_subscribable(
 	tbl regclass
 )
@@ -262,6 +250,8 @@ BEGIN
 END
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
+-- Stops the table from being subscribable.
+-- I.e removes the triggers that push changes to the events table.
 CREATE OR REPLACE FUNCTION postgraphile_meta.remove_subscribable(
 	tbl regclass
 ) RETURNS VOID AS $$
@@ -302,20 +292,17 @@ BEGIN
 			e.id, e.topic, e.row_data, e.row_before, e.diff, ARRAY_AGG(s.id)
 		FROM postgraphile_meta.subscriptions s
 		INNER JOIN tmp_events e ON (
-			s.conditions_sql = $1 AND s.topic = e.topic
+			s.topic = e.topic
 			AND ' || filter_txt || '
 			AND (
 				s.diff_only_fields IS NULL
-				OR (
-					e.diff IS NOT NULL
-					AND e.diff ?| s.diff_only_fields
-				)
+				OR (e.diff IS NOT NULL AND e.diff ?| s.diff_only_fields)
 			)
 		)
-		WHERE s.worker_device_id = $2
+		WHERE s.worker_device_id = $1 AND s.conditions_sql = $2
 		GROUP BY e.id, e.topic, e.row_data, e.row_before, e.diff
 		ORDER BY e.id ASC'
-		USING filter_txt, device_id;
+		USING device_id, filter_txt;
 END
 $$ LANGUAGE plpgsql PARALLEL SAFE;
 
@@ -346,8 +333,6 @@ BEGIN
 		ORDER BY e.id ASC
 		LIMIT batch_size;
 
-	RAISE NOTICE 'Processing events %', postgraphile_meta.get_max_pickable_event_id();
-
 	RETURN QUERY (
 		WITH relevant_sqls AS (
 			SELECT conditions_sql
@@ -374,16 +359,8 @@ BEGIN
 END
 $$ LANGUAGE plpgsql;
 
-CREATE OR REPLACE FUNCTION postgraphile_meta.remove_all_stale_devices_and_subs()
-RETURNS VOID AS $$
-BEGIN
-	DELETE FROM postgraphile_meta.active_devices
-	WHERE last_activity_at < NOW() - INTERVAL '15 minutes'
-		OR last_activity_at IS NULL;
-END
-$$ LANGUAGE plpgsql;
-
-CREATE OR REPLACE FUNCTION postgraphile_meta.remove_stale_subscriptions(
+-- Removes all temporary subscriptions for a device
+CREATE OR REPLACE FUNCTION postgraphile_meta.remove_temp_subscriptions(
 	device_id VARCHAR
 ) RETURNS VOID AS $$
 BEGIN

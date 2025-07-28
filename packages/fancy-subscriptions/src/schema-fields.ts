@@ -2,7 +2,7 @@ import { getInputConditionForResource } from '@haathie/postgraphile-common-utils
 import type { FieldPlanResolver } from 'postgraphile/grafast'
 import type { GraphQLObjectType } from 'postgraphile/graphql'
 import { CreateSubscriptionStep } from './CreateSubscriptionStep.ts'
-import { LDSSource, type PgChangeOp } from './lds.ts'
+import { type PgChangeOp, SubscriptionManager } from './manager.ts'
 import { PgWhereBuilder } from './PgWhereBuilder.ts'
 import type { PgTableResource } from './types.ts'
 import { isSubscribable } from './utils.ts'
@@ -130,7 +130,7 @@ function createSubscriptionPlan(
 
 		const $argsRaw = args.getRaw()
 		return new CreateSubscriptionStep(
-			resource, LDSSource.current, kind, $whereBuilder, $argsRaw
+			resource, SubscriptionManager.current, kind, $whereBuilder, $argsRaw
 		)
 	}
 

@@ -2,7 +2,7 @@ import { buildFieldNameToAttrNameMap } from '@haathie/postgraphile-common-utils'
 import type { GrafastFieldConfig, Step } from 'postgraphile/grafast'
 import type { GraphQLFieldConfig, GraphQLFieldExtensions, GraphQLObjectType } from 'postgraphile/graphql'
 import { CreateSubscriptionStep } from './CreateSubscriptionStep.ts'
-import { LDSSource, type PgChangeEvent } from './lds.ts'
+import { type PgChangeEvent, SubscriptionManager } from './manager.ts'
 import type { PgTableResource } from './types.ts'
 import { isSubscribable } from './utils.ts'
 
@@ -13,7 +13,7 @@ type Hook = NonNullable<
 >['init']
 
 export const schemaInitHook: Hook = (init, build) => {
-	const subSrc = LDSSource.current
+	const subSrc = SubscriptionManager.current
 	const { input: { pgRegistry: { pgResources } }, inflection } = build
 
 	for(const resource of Object.values(pgResources)) {

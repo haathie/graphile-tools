@@ -5,9 +5,6 @@ set -e
 docker compose -f dev.docker-compose.yaml up -d --wait
 echo "boot docker container"
 
-psql "$PG_URI" -f node_modules/@haathie/pgmb/sql/pgmb.sql -1
-echo "installed pgmb"
-
 psql "$PG_URI" -f packages/fancy-subscriptions/sql/fancy-subscriptions.sql -1
 echo "installed fancy-subscriptions"
 

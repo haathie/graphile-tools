@@ -20,7 +20,7 @@ TODOs:
 	```sh
 	sh scripts/bootstrap-dev.sh
 	```
-	Ensure you have `Docker`, `psql` installed. This will start a Postgres container, install `pgmb`, tools for managing LDS subscriptions, and the example `contacts` database.
+	Ensure you have `Docker`, `psql` installed. This will start a Postgres container, tools for managing subscriptions, and the example `contacts` database.
 3. Start the contacts example server:
 	```sh
 	npm run dev

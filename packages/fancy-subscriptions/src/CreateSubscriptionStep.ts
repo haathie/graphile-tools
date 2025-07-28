@@ -1,14 +1,14 @@
 import type { PgCodecWithAttributes, PgResource } from 'postgraphile/@dataplan/pg'
 import { type ExecutionDetails, type ExecutionResults, Step } from 'postgraphile/grafast'
 import { type SQL, sql } from 'postgraphile/pg-sql2'
-import { LDSSource, type PgChangeOp } from './lds.ts'
+import { type PgChangeOp, SubscriptionManager } from './manager.ts'
 import { PgWhereBuilder } from './PgWhereBuilder.ts'
 import { DEBUG } from './utils.ts'
 
 export class CreateSubscriptionStep extends Step<any> {
 
 	#resource: PgResource
-	#subSrc: LDSSource
+	#subSrc: SubscriptionManager
 	#kind: PgChangeOp
 
 	#contextDepId: number
@@ -19,7 +19,7 @@ export class CreateSubscriptionStep extends Step<any> {
 
 	constructor(
 		resource: PgResource,
-		subSrc: LDSSource,
+		subSrc: SubscriptionManager,
 		kind: PgChangeOp,
 		conditionWhereBuilder: PgWhereBuilder,
 		inputArgs: Step<any>

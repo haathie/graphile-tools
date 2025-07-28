@@ -3,13 +3,17 @@ import { PassThrough, type Writable } from 'stream'
 import { setTimeout } from 'timers/promises'
 import { DEBUG } from './utils.ts'
 
-type LDSSourceOptions = {
+type SubscriptionManagerOptions = {
 	pool: Pool
+	/**
+	 * Unique identifier for the device. For WebSocket subscriptions to work
+	 * correctly, this should be unique per device.
+	 */
 	deviceId: string
 
 	slotName?: string
 	/**
-	 * Time to sleep for between publishing changes.
+	 * Time to sleep for between reading changes.
 	 * @default 500
 	 */
 	sleepDurationMs?: number
@@ -49,9 +53,9 @@ export type CreateSubscriptionOpts = {
 	diffOnlyFields?: string[]
 }
 
-export class LDSSource {
+export class SubscriptionManager {
 
-	static #current: LDSSource | undefined
+	static #current: SubscriptionManager | undefined
 
 	slotName: string
 	deviceId: string
@@ -71,7 +75,7 @@ export class LDSSource {
 		slotName = 'postgraphile',
 		sleepDurationMs = 250,
 		chunkSize = 1000
-	}: LDSSourceOptions) {
+	}: SubscriptionManagerOptions) {
 		this.deviceId = deviceId
 		this.slotName = slotName
 		this.sleepDurationMs = sleepDurationMs
@@ -79,6 +83,12 @@ export class LDSSource {
 		this.chunkSize = chunkSize
 	}
 
+	/**
+	 * Adds a table to the list of tables that will be made subscribable. This
+	 * will be made subscribable on the next readChanges call.
+	 *
+	 * @param tableName - eg. 'public.my_table' (including schema)
+	 */
 	addTableToPublishFor(tableName: string) {
 		if(!this.#pendingTablesToPublishFor.includes(tableName)) {
 			this.#pendingTablesToPublishFor.push(tableName)
@@ -86,8 +96,19 @@ export class LDSSource {
 	}
 
 	async listen() {
+		// already listening
+		if(this.#readLoopPromise) {
+			return
+		}
+
+		// clear all temp subscriptions for this device
+		await this.#pool.query(
+			'SELECT postgraphile_meta.remove_temp_subscriptions($1)',
+			[this.deviceId]
+		)
+
 		await this.#pingDevice()
-		this.#readLoopPromise ||= this.#startReadLoop()
+		this.#readLoopPromise = this.#startReadLoop()
 
 		clearInterval(this.#devicePingInterval)
 		this.#devicePingInterval = setInterval(async() => {
@@ -169,10 +190,16 @@ export class LDSSource {
 		return [sql, params] as const
 	}
 
+	/**
+	 * Listens for changes for the given subscriptionId.
+	 * Returns an async iterator that yields PgChangeEvent objects.
+	 * @param deleteOnClose Delete the subscription when the stream closes.
+	 * 	Defaults to true.
+	 */
 	async subscribe(
 		subscriptionId: string | number,
 		deleteOnClose = true
-	): Promise<AsyncIterableIterator<PgChangeData>> {
+	): Promise<AsyncIterableIterator<PgChangeEvent>> {
 		if(this.#closed) {
 			throw new Error('Source already closed.')
 		}
@@ -205,7 +232,7 @@ export class LDSSource {
 
 		return asyncIterator
 
-		async function onEnd(this: LDSSource) {
+		async function onEnd(this: SubscriptionManager) {
 			if(!this.#subscribers[subscriptionId]) {
 				return
 			}
@@ -273,31 +300,31 @@ export class LDSSource {
 		}
 
 		const subs = Object.entries(subToEventMap)
-		await Promise.all(
-			subs.map(async([subId, items]) => {
-				const stream = this.#subscribers[subId]
-				if(!stream) {
-					DEBUG(`No stream found for subscriptionId: ${subId}`)
-					return
-				}
+		await Promise.all(subs.map(async([subId, items]) => {
+			const stream = this.#subscribers[subId]
+			if(!stream) {
+				DEBUG(`No stream found for subscriptionId: ${subId}`)
+				return
+			}
 
-				await new Promise<void>((resolve, reject) => {
-					const msg: PgChangeEvent = { eventId: items.at(-1)!.id, items }
-					stream.write(msg, err => {
-						if(err) {
-							reject(err)
-						} else {
-							resolve()
-						}
-					})
+			await new Promise<void>(resolve => {
+				const msg: PgChangeEvent = { eventId: items.at(-1)!.id, items }
+				stream.write(msg, err => {
+					if(err) {
+						DEBUG(`Error writing to stream for ${subId}:`, err)
+					}
+
+					resolve()
 				})
 			})
-		)
+		}))
 
-		console.log(
-			`Read ${rows.length} events from db to ${subs.length} subs in`
-			+ ` ${Date.now() - now}ms`
-		)
+		if(rows.length) {
+			DEBUG(
+				`Read ${rows.length} events from db to ${subs.length} subs in`
+				+ ` ${Date.now() - now}ms`
+			)
+		}
 
 		return rows.length
 	}
@@ -309,8 +336,8 @@ export class LDSSource {
 	async close() {
 		this.#closed = true
 
-		if(LDSSource.#current === this) {
-			LDSSource.#current = undefined
+		if(SubscriptionManager.#current === this) {
+			SubscriptionManager.#current = undefined
 		}
 
 		clearInterval(this.#devicePingInterval)
@@ -319,6 +346,8 @@ export class LDSSource {
 		}
 
 		await this.#readLoopPromise
+		this.#readLoopPromise = undefined
+		this.#devicePingInterval = undefined
 	}
 
 	async #startReadLoop() {
@@ -340,31 +369,35 @@ export class LDSSource {
 
 	async #pingDevice() {
 		await this.#pool.query(
-			'SELECT postgraphile_meta.mark_device_queue_active($1::varchar)',
+			'SELECT postgraphile_meta.mark_device_queue_active($1)',
 			[this.deviceId]
 		)
 	}
 
-	static init(options: LDSSourceOptions): LDSSource {
-		if(LDSSource.#current) {
-			throw new Error('LDSSource already initialized.')
+	static init(options: SubscriptionManagerOptions): SubscriptionManager {
+		if(SubscriptionManager.#current) {
+			throw new Error('SubscriptionManager already initialized.')
 		}
 
-		LDSSource.#current = new LDSSource(options)
-		return LDSSource.#current
+		SubscriptionManager.#current = new SubscriptionManager(options)
+		return SubscriptionManager.#current
 	}
 
 	static get isCurrentInitialized(): boolean {
-		return !!LDSSource.#current
+		return !!SubscriptionManager.#current
 	}
 
-	static get current(): LDSSource {
-		if(!LDSSource.#current) {
+	/**
+	 * Singleton instance of the current SubscriptionManager.
+	 * Throws an error if not initialized.
+	 */
+	static get current(): SubscriptionManager {
+		if(!SubscriptionManager.#current) {
 			throw new Error(
-				'LDSSource not initialized, call LDSSource.init() first.'
+				'SubscriptionManager not initialized, call SubscriptionManager.init() first.'
 			)
 		}
 
-		return LDSSource.#current
+		return SubscriptionManager.#current
 	}
 }
