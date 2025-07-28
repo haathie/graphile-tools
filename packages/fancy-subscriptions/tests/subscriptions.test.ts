@@ -376,7 +376,7 @@ describe('Fancy Subscriptions', () => {
 		}
 	})
 
-	it.only('should correctly batch events', async() => {
+	it('should correctly batch events', async() => {
 		// we'll test by creating multiple books
 		const iterator = client.iterate({
 			query: CREATE_SUB_QL,

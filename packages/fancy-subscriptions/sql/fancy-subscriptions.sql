@@ -61,8 +61,9 @@ RETURNS VARCHAR(24) AS $$
 	SELECT postgraphile_meta.create_event_id(
 		COALESCE(
 			postgraphile_meta.get_xact_start('postgraphile_meta', 'events'),
-			clock_timestamp()
-		)
+			NOW()
+		),
+		rand := 0
 	)
 $$ LANGUAGE sql VOLATILE STRICT PARALLEL SAFE SECURITY DEFINER;
 
@@ -314,6 +315,8 @@ CREATE OR REPLACE FUNCTION postgraphile_meta.get_events_for_subscriptions(
 	diff jsonb,
 	subscription_ids varchar(64)[]
 ) AS $$
+DECLARE
+	max_event_id VARCHAR(24) := postgraphile_meta.get_max_pickable_event_id();
 BEGIN
 	CREATE TEMP TABLE IF NOT EXISTS tmp_events
 		(LIKE postgraphile_meta.events INCLUDING DEFAULTS);
@@ -322,8 +325,7 @@ BEGIN
 		SELECT e.*
 		FROM postgraphile_meta.events e
 		INNER JOIN postgraphile_meta.active_devices d ON d.name = device_name
-		WHERE e.id > d.latest_cursor
-			AND e.id < postgraphile_meta.get_max_pickable_event_id()
+		WHERE e.id > d.latest_cursor AND e.id < max_event_id
 		ORDER BY e.id ASC
 		LIMIT batch_size;
 
