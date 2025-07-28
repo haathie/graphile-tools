@@ -37,19 +37,32 @@ BEGIN
 END
 $$ LANGUAGE plpgsql IMMUTABLE STRICT PARALLEL SAFE SECURITY DEFINER;
 
+-- get the earliest active tx start time for a table
+CREATE OR REPLACE FUNCTION postgraphile_meta.get_xact_start(
+	schema_name varchar(64),
+	table_name varchar(64)
+) RETURNS TIMESTAMPTZ AS $$
+	SELECT MIN(pa.xact_start)
+		FROM pg_stat_activity pa
+		JOIN pg_locks pl ON pl.pid = pa.pid
+		JOIN pg_class pc ON pc.oid = pl.relation
+		JOIN pg_namespace pn ON pn.oid = pc.relnamespace
+		WHERE pa.xact_start IS NOT NULL
+		AND pa.state IN ('active', 'idle in transaction')
+		AND pn.nspname = schema_name
+		AND pc.relname = table_name
+$$
+LANGUAGE sql VOLATILE STRICT PARALLEL SAFE SECURITY DEFINER;
+
 -- we'll find the latest committed event ID that can be picked up safely
--- in order to avoid missing events
+-- in order to avoid missing events. This will typically be the earliest
+-- active tx  
 CREATE OR REPLACE FUNCTION postgraphile_meta.get_max_pickable_event_id()
 RETURNS VARCHAR(24) AS $$
 BEGIN
 	RETURN postgraphile_meta.create_event_id(
 		COALESCE(
-			(
-				SELECT MIN(xact_start)
-				FROM pg_stat_activity ps
-				WHERE ps.state
-					IN ('active', 'idle in transaction', 'idle in transaction (aborted)')
-			),
+			postgraphile_meta.get_xact_start('postgraphile_meta', 'events'),
 			clock_timestamp()
 		)
 	);
@@ -138,6 +151,8 @@ CREATE INDEX IF NOT EXISTS idx_events_topic_id
 
 CREATE OR REPLACE FUNCTION postgraphile_meta.push_for_subscriptions()
 RETURNS TRIGGER AS $$
+DECLARE
+	start_num BIGINT = postgraphile_meta.create_random_bigint();
 BEGIN
 	IF TG_OP = 'INSERT' THEN
 		INSERT INTO postgraphile_meta.events(
@@ -148,7 +163,9 @@ BEGIN
 			row_data
 		)
 		SELECT
-			postgraphile_meta.create_event_id(),
+			postgraphile_meta.create_event_id(
+				rand := start_num + row_number() OVER ()
+			),
 			TG_TABLE_NAME,
 			TG_TABLE_SCHEMA,
 			TG_OP,
@@ -163,7 +180,9 @@ BEGIN
 			row_data
 		)
 		SELECT
-			postgraphile_meta.create_event_id(),
+			postgraphile_meta.create_event_id(
+				rand := start_num + row_number() OVER ()
+			),
 			TG_TABLE_NAME,
 			TG_TABLE_SCHEMA,
 			TG_OP,
@@ -181,7 +200,7 @@ BEGIN
 			diff
 		)
 		SELECT
-			postgraphile_meta.create_event_id(),
+			postgraphile_meta.create_event_id(rand := start_num + n.rn),
 			TG_TABLE_NAME,
 			TG_TABLE_SCHEMA,
 			TG_OP,

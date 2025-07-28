@@ -1,13 +1,11 @@
 import { type BootedGraphileServer, getSuperuserPool, runDdlAndBoot, runSqlFile } from '@haathie/postgraphile-common-utils/tests'
 import { createClient } from 'graphql-ws'
 import assert from 'node:assert'
-import { after, before, describe, it } from 'node:test'
+import { after, before, beforeEach, describe, it } from 'node:test'
 import { setTimeout } from 'node:timers/promises'
 import type { PoolClient } from 'pg'
 import { LDSSource } from '../src/lds.ts'
 import { CONFIG } from './config.ts'
-
-const TEST_USER_ID = 'test-user'
 
 const CREATE_QL = `mutation CreateBook($input: BookInput!) {
 	createBook(input: { book: $input }) {
@@ -62,6 +60,8 @@ describe('Fancy Subscriptions', () => {
 	let srv: BootedGraphileServer
 	let wsUrl: string
 	let client: ReturnType<typeof createClient>
+	let testUserId: string
+	let tstIdx = 0
 
 	before(async() => {
 		await runSqlFile(
@@ -75,7 +75,7 @@ describe('Fancy Subscriptions', () => {
 		client = createClient({
 			url: wsUrl,
 			connectionParams: {
-				'x-user-id': TEST_USER_ID
+				'x-user-id': testUserId
 			},
 		})
 
@@ -85,6 +85,10 @@ describe('Fancy Subscriptions', () => {
 	after(async() => {
 		await client.dispose()
 		await srv.close()
+	})
+
+	beforeEach(async() => {
+		testUserId = `test_user_${tstIdx++}`
 	})
 
 	it('should correctly generate the schema', () => {
@@ -101,7 +105,7 @@ describe('Fancy Subscriptions', () => {
 	it('should subscribe to created items', async() => {
 		const iterator = client.iterate({
 			query: CREATE_SUB_QL,
-			variables: { creatorId: TEST_USER_ID }
+			variables: { creatorId: testUserId }
 		})
 
 		const nextValue = iterator.next()
@@ -117,7 +121,7 @@ describe('Fancy Subscriptions', () => {
 					author: 'Somebody',
 				}
 			},
-			headers: { 'x-user-id': TEST_USER_ID }
+			headers: { 'x-user-id': testUserId }
 		})
 
 		const rslt = await nextValue
@@ -199,7 +203,7 @@ describe('Fancy Subscriptions', () => {
 		const iterator = client.iterate({
 			query: updateSubQl,
 			variables: {
-				creatorId: TEST_USER_ID
+				creatorId: testUserId
 			}
 		})
 
@@ -213,7 +217,7 @@ describe('Fancy Subscriptions', () => {
 					author: 'Somebody',
 				}
 			},
-			headers: { 'x-user-id': TEST_USER_ID }
+			headers: { 'x-user-id': testUserId }
 		})
 
 		await srv.graphqlRequest({
@@ -224,7 +228,7 @@ describe('Fancy Subscriptions', () => {
 					bookPatch: { title: 'Updated Book Title' }
 				}
 			},
-			headers: { 'x-user-id': TEST_USER_ID }
+			headers: { 'x-user-id': testUserId }
 		})
 
 		const {
@@ -261,7 +265,7 @@ describe('Fancy Subscriptions', () => {
 		const iterator = client.iterate({
 			query: deleteSubQl,
 			variables: {
-				creatorId: TEST_USER_ID
+				creatorId: testUserId
 			}
 		})
 
@@ -275,7 +279,7 @@ describe('Fancy Subscriptions', () => {
 					author: 'Wow',
 				}
 			},
-			headers: { 'x-user-id': TEST_USER_ID }
+			headers: { 'x-user-id': testUserId }
 		})
 
 		await srv.graphqlRequest({
@@ -287,7 +291,7 @@ describe('Fancy Subscriptions', () => {
 			variables: {
 				input: { id: book.id }
 			},
-			headers: { 'x-user-id': TEST_USER_ID }
+			headers: { 'x-user-id': testUserId }
 		})
 
 		const {
@@ -305,10 +309,9 @@ describe('Fancy Subscriptions', () => {
 	})
 
 	it('should not miss events when reading changes', async() => {
-		const creatorId = 'test-user-missed-events'
 		const iterator = client.iterate({
 			query: CREATE_SUB_QL,
-			variables: { creatorId }
+			variables: { creatorId: testUserId }
 		})
 
 		const eventsPromise = readChanges()
@@ -322,7 +325,7 @@ describe('Fancy Subscriptions', () => {
 				VALUES
 					('Test Book RC 1', 'Author RC 1', $1),
 					('Test Book RC 2', 'Author RC 2', $1)`,
-				[creatorId]
+				[testUserId]
 			)
 
 			// wait longer than the next read loop execution
@@ -336,7 +339,7 @@ describe('Fancy Subscriptions', () => {
 			await client.query(
 				`INSERT INTO subs_test.books (title, author, creator_id)
 				VALUES ('Test Book RC 3', 'Author RC 3', $1)`,
-				[creatorId]
+				[testUserId]
 			)
 		})
 
@@ -377,7 +380,7 @@ describe('Fancy Subscriptions', () => {
 		// we'll test by creating multiple books
 		const iterator = client.iterate({
 			query: CREATE_SUB_QL,
-			variables: { creatorId: TEST_USER_ID }
+			variables: { creatorId: testUserId }
 		})
 
 		const nextValue = iterator.next()
@@ -392,7 +395,7 @@ describe('Fancy Subscriptions', () => {
 							author: 'Somebody',
 						}
 					},
-					headers: { 'x-user-id': TEST_USER_ID }
+					headers: { 'x-user-id': testUserId }
 				})
 				return book
 			})
@@ -413,7 +416,7 @@ describe('Fancy Subscriptions', () => {
 		const iter = client.iterate(
 			{
 				query: CREATE_SUB_QL,
-				variables: { creatorId: TEST_USER_ID }
+				variables: { creatorId: testUserId }
 			},
 		)
 		const expectedItems = 1500
@@ -425,7 +428,7 @@ describe('Fancy Subscriptions', () => {
 		const conn = await pool.connect()
 		try {
 			await conn.query('BEGIN')
-			await conn.query(`SET app.user_id = '${TEST_USER_ID}'`)
+			await conn.query(`SET app.user_id = '${testUserId}'`)
 
 			// create a large book
 			const largeTitle = 'A'.repeat(1_000_000) // 1 MB

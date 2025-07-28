@@ -46,7 +46,9 @@ export const CONFIG: TestGraphileConfig = {
 		subscriptions: {
 			deviceId: process.env.DEVICE_ID!,
 			pollIntervalMs: 750,
-			readChunkSize: 500
+			// avoids string length issues
+			// as we'll work with large data sets in the test
+			readChunkSize: 400
 		},
 		pgServices: [
 			makePgService({
