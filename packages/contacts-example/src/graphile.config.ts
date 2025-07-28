@@ -29,7 +29,7 @@ const preset: GraphileConfig.Preset = {
 			// Database connection string, read from an environmental variable:
 			connectionString: process.env.PG_URI,
 			superuserConnectionString: process.env.PG_URI,
-			poolConfig: { min: 15, max: 30 },
+			poolConfig: { min: 20, max: 20 },
 			pgSettings(ctx) {
 				let teamId = getHeader('org-id')
 				if(typeof teamId !== 'string') {
@@ -69,7 +69,7 @@ const preset: GraphileConfig.Preset = {
 	],
 	subscriptions: {
 		deviceId: process.env.DEVICE_ID || 'default-device',
-		publishChanges: true
+		pollIntervalMs: 500
 	},
 	grafserv: {
 		// watch: true,

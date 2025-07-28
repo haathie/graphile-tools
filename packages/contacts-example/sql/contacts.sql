@@ -96,7 +96,6 @@ CREATE TABLE app.contacts (
 	UNIQUE (org_id, phone_number),
 	UNIQUE (org_id, email)
 );
-ALTER TABLE app.contacts REPLICA IDENTITY FULL;
 
 comment on table app.contacts is $$
 @behaviour +subscribable
