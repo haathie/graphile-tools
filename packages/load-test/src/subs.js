@@ -9,7 +9,7 @@ const GRAPH_QL_WS_URL = 'ws://localhost:5678/graphql'
 const UPSERT_CONTACTS_GQL = `
 mutation ContactsCreate($items: [ContactsCreateItem!]!) {
   createContacts(
-    items: $items, onConflict: Replace
+    items: $items, onConflict: Error
   ) {
     items {
       updatedAt
@@ -52,15 +52,13 @@ const SUB_QL = `subscription ContactsCreated($orgId: String!) {
 	}
 }`
 
-const TAGS_PER_TENANT = 3
-const TAGS_PER_CONTACT = 2
 const MAX_SUB_DELAY_MS = 5_000
 
 export const options = {
 	'scenarios': {
 		'constant_load': {
 			'executor': 'constant-vus',
-			'vus': 2000,
+			'vus': 5000,
 			'duration': '30s'
 		}
 	}
@@ -78,9 +76,6 @@ export default async function() {
 
 	let contactsCreated = 0
 	let msgReceived = 0
-
-	const TAG_NAMES = Array
-		.from({ length: TAGS_PER_TENANT }, (_, i) => `Tag ${i}`)
 
 	const ws = subscribe(
 		{
@@ -143,18 +138,12 @@ export default async function() {
 	check(msgReceived, { 'data received on sub': v => v === contactsCreated })
 
 	console.log('VU done, success: ', msgReceived, '=', contactsCreated)
+}
 
-	function createRandomContact() {
-		const tagsToMake = randomInt() % TAGS_PER_CONTACT
-		const tagNamesToMake = Array.from({ length: tagsToMake }, () => (
-			TAG_NAMES[randomInt() % TAG_NAMES.length]
-		))
-		return {
-			name: `Contact ${randomInt()}`,
-			phoneNumber: null,
-			contactTags: Array.from(new Set(tagNamesToMake))
-				.map(name => ({ tag: { name } }))
-		}
+function createRandomContact() {
+	return {
+		name: `Contact ${randomInt()}`,
+		phoneNumber: null
 	}
 }
 
