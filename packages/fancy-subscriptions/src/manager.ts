@@ -68,6 +68,7 @@ export class SubscriptionManager {
 	#readLoopPromise?: Promise<void>
 	#devicePingInterval?: NodeJS.Timeout
 	#pendingTablesToPublishFor: string[] = []
+	#eventsPublished = 0
 
 	constructor({
 		pool,
@@ -296,6 +297,7 @@ export class SubscriptionManager {
 			for(const subId of subIds) {
 				subToEventMap[subId] ||= []
 				subToEventMap[subId].push(row as PgChangeData)
+				this.#eventsPublished ++
 			}
 		}
 
@@ -322,7 +324,7 @@ export class SubscriptionManager {
 		if(rows.length) {
 			DEBUG(
 				`Read ${rows.length} events from db to ${subs.length} subs in`
-				+ ` ${Date.now() - now}ms`
+				+ ` ${Date.now() - now}ms, ${this.#eventsPublished} total events published`
 			)
 		}
 
