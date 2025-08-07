@@ -1,4 +1,4 @@
-import { type BootedGraphileServer, getSuperuserPool, runDdlAndBoot, runSqlFile } from '@haathie/postgraphile-common-utils/tests'
+import { type BootedGraphileServer, getSuperuserPool, runDdlAndBoot } from '@haathie/postgraphile-common-utils/tests'
 import { createClient } from 'graphql-ws'
 import assert from 'node:assert'
 import { after, before, beforeEach, describe, it } from 'node:test'
@@ -64,10 +64,9 @@ describe('Subscriptions', () => {
 	let tstIdx = 0
 
 	before(async() => {
-		await runSqlFile(
-			CONFIG.preset,
-			'packages/fancy-subscriptions/sql/fancy-subscriptions.sql'
-		)
+		const pool = getSuperuserPool(CONFIG.preset)
+		await pool.query('DROP SCHEMA IF EXISTS postgraphile_meta CASCADE;')
+
 		srv = await runDdlAndBoot(CONFIG)
 
 		wsUrl = `ws://localhost:${srv.port}/graphql`

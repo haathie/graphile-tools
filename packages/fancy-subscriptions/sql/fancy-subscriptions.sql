@@ -1,4 +1,3 @@
-DROP SCHEMA IF EXISTS postgraphile_meta CASCADE; -- TODO: remove this in production
 CREATE SCHEMA IF NOT EXISTS "postgraphile_meta";
 
 -- Unique ID of the device/server that's connected to the database.
@@ -22,6 +21,11 @@ BEGIN
 END
 $$ LANGUAGE plpgsql VOLATILE PARALLEL SAFE;
 
+-- Creates a timestamped event ID. It is a 24-character string
+-- that consists of:
+-- 1. 'ps' prefix
+-- 2. 13-character hex representation of the timestamp in microseconds
+-- 3. remaining random
 CREATE OR REPLACE FUNCTION postgraphile_meta.create_event_id(
 	ts timestamptz DEFAULT clock_timestamp(),
 	rand bigint DEFAULT postgraphile_meta.create_random_bigint()
@@ -36,7 +40,8 @@ SELECT substr(
 )
 $$ LANGUAGE sql VOLATILE STRICT PARALLEL SAFE SECURITY DEFINER;
 
--- get the earliest active tx start time for a table
+-- get the earliest active tx start time for a table. NULL if there are
+-- no active txs for the table.
 CREATE OR REPLACE FUNCTION postgraphile_meta.get_xact_start(
 	schema_name varchar(64),
 	table_name varchar(64)
@@ -60,6 +65,8 @@ CREATE OR REPLACE FUNCTION postgraphile_meta.get_max_pickable_event_id()
 RETURNS VARCHAR(24) AS $$
 	SELECT postgraphile_meta.create_event_id(
 		COALESCE(
+			-- if there are no active transactions, then we can use the current
+			-- time
 			postgraphile_meta.get_xact_start('postgraphile_meta', 'events'),
 			NOW()
 		),
@@ -67,7 +74,8 @@ RETURNS VARCHAR(24) AS $$
 	)
 $$ LANGUAGE sql VOLATILE STRICT PARALLEL SAFE SECURITY DEFINER;
 
--- Function to get the topic from a wal2json single change JSON
+-- Function to create a topic string for subscriptions.
+-- Eg. "public" "contacts" "INSERT" -> "public.contacts.INSERT"
 CREATE OR REPLACE FUNCTION postgraphile_meta.create_topic(
 	schema_name varchar(64),
 	table_name varchar(64),
@@ -76,6 +84,7 @@ CREATE OR REPLACE FUNCTION postgraphile_meta.create_topic(
 	SELECT (schema_name || '.' || table_name || '.' || kind)
 $$ LANGUAGE sql IMMUTABLE STRICT PARALLEL SAFE;
 
+-- Table to keep track of active devices. This is used to
 CREATE TABLE IF NOT EXISTS postgraphile_meta.active_devices(
 	name VARCHAR(64) PRIMARY KEY,
 	latest_cursor VARCHAR(24) NOT NULL,
@@ -83,6 +92,7 @@ CREATE TABLE IF NOT EXISTS postgraphile_meta.active_devices(
 );
 
 CREATE TYPE postgraphile_meta.config_type AS ENUM(
+	'plugin_version',
 	'oldest_partition_interval',
 	'future_partitions_to_create',
 	'partition_size'
@@ -102,7 +112,9 @@ CREATE OR REPLACE FUNCTION postgraphile_meta.get_config_value(
 $$ LANGUAGE sql STRICT PARALLEL SAFE;
 
 INSERT INTO postgraphile_meta.subscriptions_config(id, value)
-	VALUES ('oldest_partition_interval', '2 hours'),
+	VALUES
+		('plugin_version', '0.1.0'),
+		('oldest_partition_interval', '2 hours'),
 		('future_partitions_to_create', '12'),
 		('partition_size', 'hour');
 
@@ -284,6 +296,7 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 
 -- Creates a function to compute the difference between two JSONB objects
 -- Treats 'null' values, and non-existent keys as equal
+-- Eg. jsonb_diff('{"a": 1, "b": 2, "c": null}', '{"a": 1, "b": null}') = '{"b": 2}'
 CREATE OR REPLACE FUNCTION postgraphile_meta.jsonb_diff(a jsonb, b jsonb)
 RETURNS jsonb AS $$
 SELECT jsonb_object_agg(key, value) FROM (
@@ -328,8 +341,9 @@ $$ LANGUAGE plpgsql PARALLEL SAFE;
 -- Function to send changes to match & send changes to relevant subscriptions
 CREATE OR REPLACE FUNCTION postgraphile_meta.get_events_for_subscriptions(
 	device_name VARCHAR(64),
-	-- we need a batch size to avoid creating arrays that are too large
-	-- which would then cause this function to fail
+	-- Specify how many events to fetch in a single batch. Useful to limit
+	-- compute load, and to avoid overwhelming clients with too many events
+	-- at once.
 	batch_size int DEFAULT 250
 ) RETURNS TABLE(
 	id varchar(24),
@@ -387,7 +401,7 @@ CREATE OR REPLACE FUNCTION postgraphile_meta.remove_temp_subscriptions(
 	WHERE worker_device_id = device_id AND is_temporary
 $$ LANGUAGE sql;
 
-CREATE OR REPLACE FUNCTION postgraphile_meta.mark_device_queue_active(
+CREATE OR REPLACE FUNCTION postgraphile_meta.mark_device_active(
 	device_id VARCHAR(64)
 )
 RETURNS VOID AS $$
@@ -408,9 +422,10 @@ CREATE OR REPLACE FUNCTION postgraphile_meta.get_event_partition_name(
 	SELECT table_name || '_' || to_char(ts, 'YYYYMMDDHH24')
 $$ LANGUAGE sql IMMUTABLE STRICT PARALLEL SAFE;
 
--- Partition maintenance function for events table.
--- Creates partitions for the current and next hour.
--- Deletes partitions that are older than 2 hours.
+-- Partition maintenance function for events table. Creates partitions for
+-- the current and next hour. Deletes partitions that are older than 2 hours.
+-- Exact partition size and oldest partition interval can be configured
+-- using the "subscriptions_config" table.
 CREATE OR REPLACE FUNCTION postgraphile_meta.maintain_events_table(
 	current_ts timestamptz DEFAULT NOW()
 )

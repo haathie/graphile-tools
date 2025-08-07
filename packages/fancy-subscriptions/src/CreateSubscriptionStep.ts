@@ -7,6 +7,13 @@ import { DEBUG } from './utils.ts'
 
 export class CreateSubscriptionStep extends Step<any> {
 
+	/**
+	 * This set is used to track which roles have been granted
+	 * access to the subscriptions table so they can manage their
+	 * subscriptions.
+	*/
+	static #accessGivenSet = new Set<string>()
+
 	#resource: PgResource
 	#subSrc: SubscriptionManager
 	#kind: PgChangeOp
@@ -81,11 +88,23 @@ export class CreateSubscriptionStep extends Step<any> {
 				}
 			)
 
-			const { rows: [row] } = await withPgClient(
-				pgSettings,
-				client => client
+			const { rows: [row] } = await withPgClient(pgSettings, async client => {
+				if(
+					pgSettings?.role
+					&& !CreateSubscriptionStep.#accessGivenSet.has(pgSettings.role)
+				) {
+					await client.query({
+						text: ACCESS_DDL.replaceAll('<username>', pgSettings.role)
+					})
+
+					DEBUG(`Granted access to ${pgSettings.role}`)
+
+					CreateSubscriptionStep.#accessGivenSet.add(pgSettings.role)
+				}
+
+				return client
 					.query<{ id: string, topic: string }>({ text, values: params })
-			)
+			})
 
 			DEBUG(
 				`Created subscription ${row.id}, on topic ${row.topic}`
@@ -138,3 +157,21 @@ function replaceParamsWithConditionParams(sql: string) {
 	return sql
 		.replace(/\$([0-9]+)/gm, (_, index) => `(s.conditions_params[${index}])`)
 }
+
+const ACCESS_DDL = `
+BEGIN;
+GRANT USAGE, CREATE ON SCHEMA postgraphile_meta TO "<username>";
+GRANT
+	SELECT,
+	INSERT(
+		topic,
+		type,
+		additional_data,
+		conditions_sql,
+		conditions_params,
+		is_temporary,
+		diff_only_fields
+	),
+	DELETE
+ON postgraphile_meta.subscriptions TO "<username>";
+COMMIT;`

@@ -1,3 +1,5 @@
+import { readFile } from 'fs/promises'
+import { join } from 'path'
 import { Pool } from 'pg'
 import { PassThrough, type Writable } from 'stream'
 import { setTimeout } from 'timers/promises'
@@ -10,8 +12,6 @@ type SubscriptionManagerOptions = {
 	 * correctly, this should be unique per device.
 	 */
 	deviceId: string
-
-	slotName?: string
 	/**
 	 * Time to sleep for between reading changes.
 	 * @default 500
@@ -60,7 +60,6 @@ export class SubscriptionManager {
 
 	static #current: SubscriptionManager | undefined
 
-	slotName: string
 	deviceId: string
 	chunkSize: number
 	sleepDurationMs: number
@@ -77,12 +76,10 @@ export class SubscriptionManager {
 	constructor({
 		pool,
 		deviceId,
-		slotName = 'postgraphile',
 		sleepDurationMs = 250,
 		chunkSize = 1000
 	}: SubscriptionManagerOptions) {
 		this.deviceId = deviceId
-		this.slotName = slotName
 		this.sleepDurationMs = sleepDurationMs
 		this.#pool = pool
 		this.chunkSize = chunkSize
@@ -106,6 +103,7 @@ export class SubscriptionManager {
 			return
 		}
 
+		await runDdlIfRequired(this.#pool)
 		// clear all temp subscriptions for this device
 		await this.#pool.query(
 			'SELECT postgraphile_meta.remove_temp_subscriptions($1)',
@@ -113,6 +111,8 @@ export class SubscriptionManager {
 		)
 
 		await this.#pingDevice()
+		await this.#maintainEventsTable()
+
 		this.#readLoopPromise = this.#startReadLoop()
 
 		clearInterval(this.#devicePingInterval)
@@ -131,7 +131,9 @@ export class SubscriptionManager {
 			} catch(e) {
 				console.error('Error maintaining events table:', e)
 			}
-		}, MAINTENANCE_INTERVAL_MS) // every minute
+		}, MAINTENANCE_INTERVAL_MS)
+
+		DEBUG('SubscriptionManager listening for changes...')
 	}
 
 	getCreateSubscriptionSql(
@@ -208,11 +210,10 @@ export class SubscriptionManager {
 	 * Listens for changes for the given subscriptionId.
 	 * Returns an async iterator that yields PgChangeEvent objects.
 	 * @param deleteOnClose Delete the subscription when the stream closes.
-	 * 	Defaults to true.
 	 */
 	async subscribe(
 		subscriptionId: string | number,
-		deleteOnClose = true
+		deleteOnClose: boolean
 	): Promise<AsyncIterableIterator<PgChangeEvent>> {
 		if(this.#closed) {
 			throw new Error('Source already closed.')
@@ -221,8 +222,6 @@ export class SubscriptionManager {
 		if(this.#subscribers[subscriptionId]) {
 			throw new Error(`Subscription already exists for: ${subscriptionId}`)
 		}
-
-		await this.listen()
 
 		DEBUG(`Creating stream for subscriptionId: ${subscriptionId}`)
 
@@ -270,6 +269,12 @@ export class SubscriptionManager {
 		}
 	}
 
+	/**
+	 * Makes the given tables subscribable. This is a one-time operation
+	 * that allows the subscription manager to start listening for changes
+	 * on these tables.
+	 * @param tableNames eg. ['public.my_table', 'public.my_other_table']
+	 */
 	async makeSubscribable(...tableNames: string[]) {
 		const conn = await this.#pool.connect()
 		try {
@@ -385,22 +390,21 @@ export class SubscriptionManager {
 
 	async #pingDevice() {
 		await this.#pool.query(
-			'SELECT postgraphile_meta.mark_device_queue_active($1)',
+			'SELECT postgraphile_meta.mark_device_active($1)',
 			[this.deviceId]
 		)
 	}
 
 	async #maintainEventsTable() {
-		await this.#pool.query('SELECT maintain_events_table()')
+		await this.#pool.query('SELECT postgraphile_meta.maintain_events_table()')
 	}
 
-	static init(options: SubscriptionManagerOptions): SubscriptionManager {
+	static init(options: SubscriptionManagerOptions) {
 		if(SubscriptionManager.#current) {
 			throw new Error('SubscriptionManager already initialized.')
 		}
 
-		SubscriptionManager.#current = new SubscriptionManager(options)
-		return SubscriptionManager.#current
+		return (SubscriptionManager.#current = new SubscriptionManager(options))
 	}
 
 	static get isCurrentInitialized(): boolean {
@@ -420,4 +424,23 @@ export class SubscriptionManager {
 
 		return SubscriptionManager.#current
 	}
+}
+
+async function runDdlIfRequired(pgPool: Pool) {
+	// check if the schema exists
+	const { rows } = await pgPool.query(
+		'SELECT 1 FROM pg_namespace WHERE nspname = $1',
+		['postgraphile_meta']
+	)
+	if(rows.length) {
+		DEBUG('Schema postgraphile_meta already exists, skipping DDL.')
+		return
+	}
+
+	DEBUG('Running DDL for postgraphile_meta schema...')
+	const ddlFilename
+		= join(import.meta.dirname, '../sql/fancy-subscriptions.sql')
+	const ddl = await readFile(ddlFilename, 'utf8')
+	await pgPool.query(`BEGIN;\n${ddl};\nCOMMIT;`)
+	DEBUG('DDL for postgraphile_meta schema completed.')
 }
