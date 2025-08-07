@@ -95,7 +95,7 @@ async function bench() {
 		connectionString: pool.options.connectionString!
 	})
 
-	await pool.query('DROP SCHEMA IF EXISTS postgraphile_meta CASCADE;')
+	await pool.query('DROP SCHEMA IF EXISTS postg_realtime CASCADE;')
 
 	await runDdl(CONFIG)
 
@@ -117,7 +117,7 @@ async function bench() {
 		})
 
 		const { rows } = await pool.query(
-			`INSERT INTO postgraphile_meta.subscriptions (worker_device_id, topic, conditions_sql, conditions_params)
+			`INSERT INTO postg_realtime.subscriptions (worker_device_id, topic, conditions_sql, conditions_params)
 			VALUES ${subs.map((_, idx) => (`('${deviceName}', 'subs_test.books.INSERT', $${idx * 2 + 1}, $${idx * 2 + 2})`)).join(',')}
 			RETURNING id
 			`,

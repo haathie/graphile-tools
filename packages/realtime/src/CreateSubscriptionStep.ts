@@ -1,4 +1,4 @@
-import type { PgCodecWithAttributes, PgResource } from 'postgraphile/@dataplan/pg'
+import { type PgCodecWithAttributes, type PgResource } from 'postgraphile/@dataplan/pg'
 import { type ExecutionDetails, type ExecutionResults, Step } from 'postgraphile/grafast'
 import { type SQL, sql } from 'postgraphile/pg-sql2'
 import { type PgChangeOp, SubscriptionManager } from './manager.ts'
@@ -88,23 +88,22 @@ export class CreateSubscriptionStep extends Step<any> {
 				}
 			)
 
-			const { rows: [row] } = await withPgClient(pgSettings, async client => {
-				if(
-					pgSettings?.role
-					&& !CreateSubscriptionStep.#accessGivenSet.has(pgSettings.role)
-				) {
-					await client.query({
-						text: ACCESS_DDL.replaceAll('<username>', pgSettings.role)
-					})
+			if(
+				pgSettings?.role
+				&& !CreateSubscriptionStep.#accessGivenSet.has(pgSettings.role)
+			) {
+				await this.#subSrc.pool.query({
+					text: ACCESS_DDL.replaceAll('<username>', pgSettings.role)
+				})
 
-					DEBUG(`Granted access to ${pgSettings.role}`)
+				DEBUG(`Granted access to ${pgSettings.role}`)
 
-					CreateSubscriptionStep.#accessGivenSet.add(pgSettings.role)
-				}
+				CreateSubscriptionStep.#accessGivenSet.add(pgSettings.role)
+			}
 
-				return client
-					.query<{ id: string, topic: string }>({ text, values: params })
-			})
+			const { rows: [row] } = await withPgClient(pgSettings, async client => (
+				client.query<{ id: string, topic: string }>({ text, values: params })
+			))
 
 			DEBUG(
 				`Created subscription ${row.id}, on topic ${row.topic}`
@@ -160,7 +159,7 @@ function replaceParamsWithConditionParams(sql: string) {
 
 const ACCESS_DDL = `
 BEGIN;
-GRANT USAGE, CREATE ON SCHEMA postgraphile_meta TO "<username>";
+GRANT USAGE, CREATE ON SCHEMA postg_realtime TO "<username>";
 GRANT
 	SELECT,
 	INSERT(
@@ -173,5 +172,5 @@ GRANT
 		diff_only_fields
 	),
 	DELETE
-ON postgraphile_meta.subscriptions TO "<username>";
+ON postg_realtime.subscriptions TO "<username>";
 COMMIT;`

@@ -1,8 +1,8 @@
 {
-	"name": "@haathie/postgraphile-fancy-subscriptions",
+	"name": "@haathie/postgraphile-realtime",
 	"version": "0.1.0",
 	"type": "module",
-	"files": ["lib"],
+	"files": ["lib", "sql"],
 	"main": "lib/index.js",
 	"types": "lib/index.d.ts",
 	"scripts": {

@@ -5,9 +5,22 @@ export type PgTableResource = PgResource<string, PgCodecWithAttributes>
 declare global {
 	namespace GraphileConfig {
 		interface Preset {
-			subscriptions?: {
+			pgRealtime?: {
+				/**
+				 * A unique identifier for this device/machine that will
+				 * persist across restarts.
+				 * Eg. EC2 instance ID, k8s FQDN in a stateful set, etc.
+				 */
 				deviceId: string
+				/**
+				 * How many events to read in a single read operation.
+				 * @default 1000
+				 */
 				readChunkSize?: number
+				/**
+				 * How often to poll the database for new events.
+				 * @default 500
+				 */
 				pollIntervalMs?: number
 			}
 		}

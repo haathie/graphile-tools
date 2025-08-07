@@ -65,7 +65,7 @@ describe('Subscriptions', () => {
 
 	before(async() => {
 		const pool = getSuperuserPool(CONFIG.preset)
-		await pool.query('DROP SCHEMA IF EXISTS postgraphile_meta CASCADE;')
+		await pool.query('DROP SCHEMA IF EXISTS postg_realtime CASCADE;')
 
 		srv = await runDdlAndBoot(CONFIG)
 
@@ -505,7 +505,7 @@ describe('Subscriptions', () => {
 		)
 
 		await pool.query(
-			"SELECT postgraphile_meta.maintain_events_table(NOW() + INTERVAL '3 hours')"
+			"SELECT postg_realtime.maintain_events_table(NOW() + INTERVAL '3 hours')"
 		)
 
 		const { rows: newParts } = await pool.query(

@@ -1,22 +1,6 @@
-GRANT USAGE, CREATE ON SCHEMA postgraphile_meta TO "app_user";
-
-GRANT
-	SELECT,
-	INSERT(
-		topic,
-		type,
-		additional_data,
-		conditions_sql,
-		conditions_params,
-		is_temporary,
-		diff_only_fields
-	),
-	DELETE
-ON postgraphile_meta.subscriptions TO "app_user";
-
 -- Create RLS policies for subscriptions table
-DROP POLICY IF EXISTS app_user_subscriptions ON postgraphile_meta.subscriptions;
-CREATE POLICY app_user_subscriptions ON postgraphile_meta.subscriptions
+DROP POLICY IF EXISTS app_user_subscriptions ON postg_realtime.subscriptions;
+CREATE POLICY app_user_subscriptions ON postg_realtime.subscriptions
 FOR ALL TO "app_user"
 -- allow selecting all subs, as they're not really selected
 USING (TRUE)

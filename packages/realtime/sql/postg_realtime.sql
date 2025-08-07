@@ -1,16 +1,16 @@
-CREATE SCHEMA IF NOT EXISTS "postgraphile_meta";
+CREATE SCHEMA IF NOT EXISTS "postg_realtime";
 
 -- Unique ID of the device/server that's connected to the database.
 -- Could be hostname, or some other unique identifier. Used to identify
 -- which subscriptions reside on which device.
-CREATE OR REPLACE FUNCTION postgraphile_meta.get_session_device_id()
+CREATE OR REPLACE FUNCTION postg_realtime.get_session_device_id()
 RETURNS VARCHAR AS $$
 	SELECT current_setting('app.device_id');
 $$ LANGUAGE sql IMMUTABLE STRICT PARALLEL SAFE SECURITY DEFINER;
 
 -- fn to create a random bigint. Used for message IDs
 -- copied from pgmb
-CREATE OR REPLACE FUNCTION postgraphile_meta.create_random_bigint()
+CREATE OR REPLACE FUNCTION postg_realtime.create_random_bigint()
 RETURNS BIGINT AS $$
 BEGIN
 	-- the message ID allows for 7 hex-bytes of randomness,
@@ -26,9 +26,9 @@ $$ LANGUAGE plpgsql VOLATILE PARALLEL SAFE;
 -- 1. 'ps' prefix
 -- 2. 13-character hex representation of the timestamp in microseconds
 -- 3. remaining random
-CREATE OR REPLACE FUNCTION postgraphile_meta.create_event_id(
+CREATE OR REPLACE FUNCTION postg_realtime.create_event_id(
 	ts timestamptz DEFAULT clock_timestamp(),
-	rand bigint DEFAULT postgraphile_meta.create_random_bigint()
+	rand bigint DEFAULT postg_realtime.create_random_bigint()
 )
 RETURNS VARCHAR(24) AS $$
 SELECT substr(
@@ -42,7 +42,7 @@ $$ LANGUAGE sql VOLATILE STRICT PARALLEL SAFE SECURITY DEFINER;
 
 -- get the earliest active tx start time for a table. NULL if there are
 -- no active txs for the table.
-CREATE OR REPLACE FUNCTION postgraphile_meta.get_xact_start(
+CREATE OR REPLACE FUNCTION postg_realtime.get_xact_start(
 	schema_name varchar(64),
 	table_name varchar(64)
 ) RETURNS TIMESTAMPTZ AS $$
@@ -61,13 +61,13 @@ LANGUAGE sql VOLATILE STRICT PARALLEL SAFE SECURITY DEFINER;
 -- we'll find the latest committed event ID that can be picked up safely
 -- in order to avoid missing events. This will typically be the earliest
 -- active tx  
-CREATE OR REPLACE FUNCTION postgraphile_meta.get_max_pickable_event_id()
+CREATE OR REPLACE FUNCTION postg_realtime.get_max_pickable_event_id()
 RETURNS VARCHAR(24) AS $$
-	SELECT postgraphile_meta.create_event_id(
+	SELECT postg_realtime.create_event_id(
 		COALESCE(
 			-- if there are no active transactions, then we can use the current
 			-- time
-			postgraphile_meta.get_xact_start('postgraphile_meta', 'events'),
+			postg_realtime.get_xact_start('postg_realtime', 'events'),
 			NOW()
 		),
 		rand := 0
@@ -76,7 +76,7 @@ $$ LANGUAGE sql VOLATILE STRICT PARALLEL SAFE SECURITY DEFINER;
 
 -- Function to create a topic string for subscriptions.
 -- Eg. "public" "contacts" "INSERT" -> "public.contacts.INSERT"
-CREATE OR REPLACE FUNCTION postgraphile_meta.create_topic(
+CREATE OR REPLACE FUNCTION postg_realtime.create_topic(
 	schema_name varchar(64),
 	table_name varchar(64),
 	kind varchar(16)
@@ -85,44 +85,44 @@ CREATE OR REPLACE FUNCTION postgraphile_meta.create_topic(
 $$ LANGUAGE sql IMMUTABLE STRICT PARALLEL SAFE;
 
 -- Table to keep track of active devices. This is used to
-CREATE TABLE IF NOT EXISTS postgraphile_meta.active_devices(
+CREATE TABLE IF NOT EXISTS postg_realtime.active_devices(
 	name VARCHAR(64) PRIMARY KEY,
 	latest_cursor VARCHAR(24) NOT NULL,
 	last_activity_at TIMESTAMPTZ DEFAULT NULL
 );
 
-CREATE TYPE postgraphile_meta.config_type AS ENUM(
+CREATE TYPE postg_realtime.config_type AS ENUM(
 	'plugin_version',
 	'oldest_partition_interval',
 	'future_partitions_to_create',
 	'partition_size'
 );
 
-CREATE TABLE IF NOT EXISTS postgraphile_meta.subscriptions_config(
+CREATE TABLE IF NOT EXISTS postg_realtime.subscriptions_config(
 	-- unique identifier for the subscription config
-	id postgraphile_meta.config_type PRIMARY KEY,
+	id postg_realtime.config_type PRIMARY KEY,
 	value TEXT
 );
 
-CREATE OR REPLACE FUNCTION postgraphile_meta.get_config_value(
-	config_id postgraphile_meta.config_type
+CREATE OR REPLACE FUNCTION postg_realtime.get_config_value(
+	config_id postg_realtime.config_type
 ) RETURNS TEXT AS $$
-	SELECT value FROM postgraphile_meta.subscriptions_config
+	SELECT value FROM postg_realtime.subscriptions_config
 	WHERE id = config_id
 $$ LANGUAGE sql STRICT PARALLEL SAFE;
 
-INSERT INTO postgraphile_meta.subscriptions_config(id, value)
+INSERT INTO postg_realtime.subscriptions_config(id, value)
 	VALUES
 		('plugin_version', '0.1.0'),
 		('oldest_partition_interval', '2 hours'),
 		('future_partitions_to_create', '12'),
 		('partition_size', 'hour');
 
-CREATE TABLE IF NOT EXISTS postgraphile_meta.subscriptions (
+CREATE TABLE IF NOT EXISTS postg_realtime.subscriptions (
 	-- unique identifier for the subscription
 	id VARCHAR(48) PRIMARY KEY DEFAULT gen_random_uuid()::varchar,
 	created_at TIMESTAMPTZ DEFAULT NOW(),
-	worker_device_id VARCHAR(64) NOT NULL DEFAULT postgraphile_meta.get_session_device_id(),
+	worker_device_id VARCHAR(64) NOT NULL DEFAULT postg_realtime.get_session_device_id(),
 	topic VARCHAR(255) NOT NULL,
 	-- if conditions_sql is NULL, then the subscription will receive
 	-- all changes for the topic. Otherwise, it will receive only changes
@@ -145,18 +145,18 @@ CREATE TABLE IF NOT EXISTS postgraphile_meta.subscriptions (
 );
 
 CREATE INDEX IF NOT EXISTS idx_subs_device_conds_topic
-	ON postgraphile_meta.subscriptions(worker_device_id, conditions_sql, topic);
+	ON postg_realtime.subscriptions(worker_device_id, conditions_sql, topic);
 
-ALTER TABLE postgraphile_meta.subscriptions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE postg_realtime.subscriptions ENABLE ROW LEVEL SECURITY;
 
-CREATE TABLE IF NOT EXISTS postgraphile_meta.events(
+CREATE TABLE IF NOT EXISTS postg_realtime.events(
 	id varchar(24) PRIMARY KEY,
 	table_name varchar(64) NOT NULL,
 	schema_name varchar(64) NOT NULL,
 	op varchar(16) NOT NULL, -- 'INSERT', 'UPDATE', 'DELETE'
 	topic varchar(255) NOT NULL GENERATED ALWAYS AS (
 		-- topic is a combination of table, schema and action
-		postgraphile_meta.create_topic(schema_name, table_name, op)
+		postg_realtime.create_topic(schema_name, table_name, op)
 	) STORED,
 	row_before jsonb, -- the old state of the row (only for updates)
 	row_data jsonb, -- the current state of the row
@@ -165,16 +165,16 @@ CREATE TABLE IF NOT EXISTS postgraphile_meta.events(
 ) PARTITION BY RANGE (id);
 
 CREATE INDEX IF NOT EXISTS idx_events_topic_id
-	ON postgraphile_meta.events (topic, id);
+	ON postg_realtime.events (topic, id);
 
 -- Trigger that pushes changes to the events table
-CREATE OR REPLACE FUNCTION postgraphile_meta.push_for_subscriptions()
+CREATE OR REPLACE FUNCTION postg_realtime.push_for_subscriptions()
 RETURNS TRIGGER AS $$
 DECLARE
-	start_num BIGINT = postgraphile_meta.create_random_bigint();
+	start_num BIGINT = postg_realtime.create_random_bigint();
 BEGIN
 	IF TG_OP = 'INSERT' THEN
-		INSERT INTO postgraphile_meta.events(
+		INSERT INTO postg_realtime.events(
 			id,
 			table_name,
 			schema_name,
@@ -182,14 +182,14 @@ BEGIN
 			row_data
 		)
 		SELECT
-			postgraphile_meta.create_event_id(rand := start_num + row_number() OVER ()),
+			postg_realtime.create_event_id(rand := start_num + row_number() OVER ()),
 			TG_TABLE_NAME,
 			TG_TABLE_SCHEMA,
 			TG_OP,
 			to_jsonb(n)
 		FROM NEW n;
 	ELSIF TG_OP = 'DELETE' THEN
-		INSERT INTO postgraphile_meta.events(
+		INSERT INTO postg_realtime.events(
 			id,
 			table_name,
 			schema_name,
@@ -197,7 +197,7 @@ BEGIN
 			row_data
 		)
 		SELECT
-			postgraphile_meta.create_event_id(
+			postg_realtime.create_event_id(
 				rand := start_num + row_number() OVER ()
 			),
 			TG_TABLE_NAME,
@@ -207,7 +207,7 @@ BEGIN
 		FROM OLD o;
 	ELSIF TG_OP = 'UPDATE' THEN
 		-- For updates, we can send both old and new data
-		INSERT INTO postgraphile_meta.events(
+		INSERT INTO postg_realtime.events(
 			id,
 			table_name,
 			schema_name,
@@ -217,13 +217,13 @@ BEGIN
 			diff
 		)
 		SELECT
-			postgraphile_meta.create_event_id(rand := start_num + n.rn),
+			postg_realtime.create_event_id(rand := start_num + n.rn),
 			TG_TABLE_NAME,
 			TG_TABLE_SCHEMA,
 			TG_OP,
 			n.data,
 			o.data,
-			postgraphile_meta.jsonb_diff(n.data, o.data)
+			postg_realtime.jsonb_diff(n.data, o.data)
 		FROM (
 			SELECT to_jsonb(n) as data, row_number() OVER () AS rn FROM NEW n
 		) AS n
@@ -238,7 +238,7 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 
 -- Makes the specified table subscribable. I.e attach triggers to it
 -- that push changes to the events table.
-CREATE OR REPLACE FUNCTION postgraphile_meta.make_subscribable(
+CREATE OR REPLACE FUNCTION postg_realtime.make_subscribable(
 	tbl regclass
 )
 RETURNS VOID AS $$
@@ -250,7 +250,7 @@ BEGIN
 			AFTER INSERT ON ' || tbl::varchar || '
 			REFERENCING NEW TABLE AS NEW
 			FOR EACH STATEMENT
-			EXECUTE FUNCTION postgraphile_meta.push_for_subscriptions();';
+			EXECUTE FUNCTION postg_realtime.push_for_subscriptions();';
 	EXCEPTION
 		WHEN duplicate_object THEN
 			NULL;
@@ -261,7 +261,7 @@ BEGIN
 			AFTER DELETE ON ' || tbl::varchar || '
 			REFERENCING OLD TABLE AS OLD
 			FOR EACH STATEMENT
-			EXECUTE FUNCTION postgraphile_meta.push_for_subscriptions();';
+			EXECUTE FUNCTION postg_realtime.push_for_subscriptions();';
 	EXCEPTION
 		WHEN duplicate_object THEN
 			NULL;
@@ -273,7 +273,7 @@ BEGIN
 			REFERENCING OLD TABLE AS OLD
 			NEW TABLE AS NEW
 			FOR EACH STATEMENT
-			EXECUTE FUNCTION postgraphile_meta.push_for_subscriptions();';
+			EXECUTE FUNCTION postg_realtime.push_for_subscriptions();';
 	EXCEPTION
 		WHEN duplicate_object THEN
 			NULL;
@@ -283,7 +283,7 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 
 -- Stops the table from being subscribable.
 -- I.e removes the triggers that push changes to the events table.
-CREATE OR REPLACE FUNCTION postgraphile_meta.remove_subscribable(
+CREATE OR REPLACE FUNCTION postg_realtime.remove_subscribable(
 	tbl regclass
 ) RETURNS VOID AS $$
 BEGIN
@@ -297,7 +297,7 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 -- Creates a function to compute the difference between two JSONB objects
 -- Treats 'null' values, and non-existent keys as equal
 -- Eg. jsonb_diff('{"a": 1, "b": 2, "c": null}', '{"a": 1, "b": null}') = '{"b": 2}'
-CREATE OR REPLACE FUNCTION postgraphile_meta.jsonb_diff(a jsonb, b jsonb)
+CREATE OR REPLACE FUNCTION postg_realtime.jsonb_diff(a jsonb, b jsonb)
 RETURNS jsonb AS $$
 SELECT jsonb_object_agg(key, value) FROM (
 	SELECT key, value FROM jsonb_each(a) WHERE value != 'null'::jsonb
@@ -306,7 +306,7 @@ SELECT jsonb_object_agg(key, value) FROM (
 )
 $$ LANGUAGE sql IMMUTABLE STRICT PARALLEL SAFE;
 
-CREATE OR REPLACE FUNCTION postgraphile_meta.get_events_for_subscriptions_by_filter(
+CREATE OR REPLACE FUNCTION postg_realtime.get_events_for_subscriptions_by_filter(
 	filter_txt TEXT,
 	device_id VARCHAR(64)
 )
@@ -322,7 +322,7 @@ BEGIN
 	RETURN QUERY EXECUTE '
 		SELECT
 			e.id, e.topic, e.row_data, e.row_before, e.diff, ARRAY_AGG(s.id)
-		FROM postgraphile_meta.subscriptions s
+		FROM postg_realtime.subscriptions s
 		INNER JOIN tmp_events e ON (
 			s.topic = e.topic
 			AND ' || filter_txt || '
@@ -339,7 +339,7 @@ END
 $$ LANGUAGE plpgsql PARALLEL SAFE;
 
 -- Function to send changes to match & send changes to relevant subscriptions
-CREATE OR REPLACE FUNCTION postgraphile_meta.get_events_for_subscriptions(
+CREATE OR REPLACE FUNCTION postg_realtime.get_events_for_subscriptions(
 	device_name VARCHAR(64),
 	-- Specify how many events to fetch in a single batch. Useful to limit
 	-- compute load, and to avoid overwhelming clients with too many events
@@ -354,15 +354,15 @@ CREATE OR REPLACE FUNCTION postgraphile_meta.get_events_for_subscriptions(
 	subscription_ids varchar(64)[]
 ) AS $$
 DECLARE
-	max_event_id VARCHAR(24) := postgraphile_meta.get_max_pickable_event_id();
+	max_event_id VARCHAR(24) := postg_realtime.get_max_pickable_event_id();
 BEGIN
 	CREATE TEMP TABLE IF NOT EXISTS tmp_events
-		(LIKE postgraphile_meta.events INCLUDING DEFAULTS);
+		(LIKE postg_realtime.events INCLUDING DEFAULTS);
 
 	INSERT INTO tmp_events
 		SELECT e.*
-		FROM postgraphile_meta.events e
-		INNER JOIN postgraphile_meta.active_devices d ON d.name = device_name
+		FROM postg_realtime.events e
+		INNER JOIN postg_realtime.active_devices d ON d.name = device_name
 		WHERE e.id > d.latest_cursor AND e.id < max_event_id
 		ORDER BY e.id ASC
 		LIMIT batch_size;
@@ -370,18 +370,18 @@ BEGIN
 	RETURN QUERY (
 		WITH relevant_sqls AS (
 			SELECT conditions_sql
-			FROM postgraphile_meta.subscriptions s
+			FROM postg_realtime.subscriptions s
 			WHERE s.worker_device_id = device_name
 			GROUP BY conditions_sql
 		),
 		result AS (
 			SELECT e.* FROM relevant_sqls s
-			CROSS JOIN postgraphile_meta.get_events_for_subscriptions_by_filter(
+			CROSS JOIN postg_realtime.get_events_for_subscriptions_by_filter(
 				s.conditions_sql, device_name
 			) e
 		),
 		updated_active_devices AS (
-			UPDATE postgraphile_meta.active_devices d
+			UPDATE postg_realtime.active_devices d
 			SET latest_cursor = (SELECT MAX(e.id) FROM tmp_events e)
 			WHERE d.name = device_name
 				-- only update if we actually inserted some events
@@ -394,28 +394,28 @@ END
 $$ LANGUAGE plpgsql;
 
 -- Removes all temporary subscriptions for a device
-CREATE OR REPLACE FUNCTION postgraphile_meta.remove_temp_subscriptions(
+CREATE OR REPLACE FUNCTION postg_realtime.remove_temp_subscriptions(
 	device_id VARCHAR
 ) RETURNS VOID AS $$
-	DELETE FROM postgraphile_meta.subscriptions
+	DELETE FROM postg_realtime.subscriptions
 	WHERE worker_device_id = device_id AND is_temporary
 $$ LANGUAGE sql;
 
-CREATE OR REPLACE FUNCTION postgraphile_meta.mark_device_active(
+CREATE OR REPLACE FUNCTION postg_realtime.mark_device_active(
 	device_id VARCHAR(64)
 )
 RETURNS VOID AS $$
-	INSERT INTO postgraphile_meta.active_devices
+	INSERT INTO postg_realtime.active_devices
 		(name, latest_cursor, last_activity_at)
 	VALUES (
 		device_id,
-		postgraphile_meta.get_max_pickable_event_id(),
+		postg_realtime.get_max_pickable_event_id(),
 		NOW()
 	)
 	ON CONFLICT (name) DO UPDATE SET last_activity_at = NOW()
 $$ LANGUAGE sql;
 
-CREATE OR REPLACE FUNCTION postgraphile_meta.get_event_partition_name(
+CREATE OR REPLACE FUNCTION postg_realtime.get_event_partition_name(
 	table_name TEXT,
 	ts timestamptz
 ) RETURNS TEXT AS $$
@@ -426,20 +426,20 @@ $$ LANGUAGE sql IMMUTABLE STRICT PARALLEL SAFE;
 -- the current and next hour. Deletes partitions that are older than 2 hours.
 -- Exact partition size and oldest partition interval can be configured
 -- using the "subscriptions_config" table.
-CREATE OR REPLACE FUNCTION postgraphile_meta.maintain_events_table(
+CREATE OR REPLACE FUNCTION postg_realtime.maintain_events_table(
 	current_ts timestamptz DEFAULT NOW()
 )
 RETURNS void AS $$
 DECLARE
-	schema_name TEXT := 'postgraphile_meta';
+	schema_name TEXT := 'postg_realtime';
 	table_name TEXT := 'events';
-	partition_size TEXT := postgraphile_meta
+	partition_size TEXT := postg_realtime
 		.get_config_value('partition_size');
 	partition_interval INTERVAL := ('1 ' || partition_size);
 
-	oldest_partition_interval INTERVAL := postgraphile_meta
+	oldest_partition_interval INTERVAL := postg_realtime
 		.get_config_value('oldest_partition_interval')::INTERVAL;
-	future_partitions_to_create INT := postgraphile_meta
+	future_partitions_to_create INT := postg_realtime
 		.get_config_value('future_partitions_to_create')::INT;
 
 	lock_key BIGINT :=
@@ -462,11 +462,11 @@ BEGIN
 				'CREATE TABLE IF NOT EXISTS %I.%I PARTITION OF %I.%I
 					FOR VALUES FROM (%L) TO (%L)',
 				schema_name,
-				postgraphile_meta.get_event_partition_name(table_name, target_ts),
+				postg_realtime.get_event_partition_name(table_name, target_ts),
 				schema_name,
 				table_name,
-				postgraphile_meta.create_event_id(target_ts, 0),
-				postgraphile_meta.create_event_id(target_ts + partition_interval, 0)
+				postg_realtime.create_event_id(target_ts, 0),
+				postg_realtime.create_event_id(target_ts + partition_interval, 0)
 			);
 		END;
 	END LOOP;
@@ -475,7 +475,7 @@ BEGIN
 	FOR p_info IN (
 		SELECT relname FROM pg_class
 		WHERE
-			relname < postgraphile_meta.get_event_partition_name(
+			relname < postg_realtime.get_event_partition_name(
 				table_name, current_ts - oldest_partition_interval
 			)
 			AND relname LIKE (table_name || '_%')
@@ -491,4 +491,4 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-SELECT postgraphile_meta.maintain_events_table();
+SELECT postg_realtime.maintain_events_table();

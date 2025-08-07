@@ -1,7 +1,7 @@
 import type { TestGraphileConfig } from '@haathie/postgraphile-common-utils/tests'
 import { makePgService } from 'postgraphile/adaptors/pg'
 import { PostGraphileAmberPreset } from 'postgraphile/presets/amber'
-import { FancySubscriptionsPlugin } from '../src/index.ts'
+import { PgRealtimePlugin } from '../src/index.ts'
 
 declare global {
 	namespace Grafast {
@@ -41,9 +41,9 @@ export const CONFIG: TestGraphileConfig = {
 	`,
 	preset: {
 		extends: [PostGraphileAmberPreset],
-		plugins: [FancySubscriptionsPlugin],
+		plugins: [PgRealtimePlugin],
 		grafserv: { websockets: true },
-		subscriptions: {
+		pgRealtime: {
 			deviceId: process.env.DEVICE_ID!,
 			pollIntervalMs: 750,
 			// avoids string length issues

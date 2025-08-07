@@ -1,26 +1,26 @@
-# Postgraphile Fancy Subscriptions
+# Postgraphile Realtime
 
-Plugin to enable streaming subscriptions for any table. This plugin creates a trigger to capture changes for any table, using no other dependencies, and subscribe to those changes using GraphQL subscriptions.
+Plugin to enable realtime subscriptions for any table. This plugin creates a trigger to capture changes for any table, using no other dependencies, and subscribe to those changes using GraphQL subscriptions.
 The plugin is quite performant and can handle large datasets efficiently. It doesn't rely on logical replication as large txs can significantly slow down the replication stream.
 
-Note: this will modify your database by adding a `fancy_subscriptions` schema, all tables/fns related to the plugin are stored there.
+Note: this will modify your database by adding a `postg_realtime` schema, all tables/fns related to the plugin are stored there.
 
 ## Usage
 
 Install the plugin:
 ```bash
-npm i @haathie/postgraphile-fancy-subscriptions
+npm i @haathie/postgraphile-realtime
 ```
 
 In your Graphile config, add the plugin & its config:
 ``` js
-import { FancySubscriptionsPlugin } from '@haathie/postgraphile-fancy-subscriptions'
+import { PgRealtimePlugin } from '@haathie/postgraphile-realtime'
 
 export const config = {
 	...otherOpts,
 	plugins: [
 		...otherPlugins,
-		FancySubscriptionsPlugin
+		PgRealtimePlugin
 	],
 	subscriptions: {
 		// a unique identifier for the device (machine) that's persistent across restarts
@@ -79,7 +79,7 @@ subscription UpdatedContacts {
 Subscriptions can be secured using an RLS policy. In the example above, we want to ensure that the subscription only returns contacts for a specific organization. We can do this by adding an RLS policy to the `contacts` table:
 
 ``` sql
-CREATE POLICY app_user_subscriptions ON postgraphile_meta.subscriptions
+CREATE POLICY app_user_subscriptions ON postg_realtime.subscriptions
 FOR ALL TO "app_user"
 USING (
 	-- subscriptions aren't really selected by the role that's creating them,
@@ -106,7 +106,7 @@ Note: the plugin will automatically give the `app_user` role access to create su
 	- remove the behaviour from the table
 	- run the following SQL to remove the trigger and function:
 	``` sql
-	SELECT fancy_subscriptions.remove_subscribable('app.contacts');
+	SELECT postg_realtime.remove_subscribable('app.contacts');
 	```
 2. Each "device" or worker that reads events maintains a cursor of the latest event its read from the `events` table. To avoid missing events from ongoing transactions that get committed after the cursor is set, the plugin only reads events that are older than the start of the oldest transaction modifying the `events` table.
 A consquence of this is that if a transaction is long-running, the device will not read any new events until the transaction is committed. This can lead to delays in processing events.
@@ -144,7 +144,7 @@ To put it all together, "events" are sent to relevant subscriptions by
 	(just for clarity, `e` is the event, `s` is the subscription)
 	In the case above, these 4 subscriptions will be grouped into 2 unique conditions, i.e. `"e.row_data->>'orgId' = s.conditions_params[1]"` and `"e.row_data->>'id' = s.conditions_params[1]"`. Both of these conditions are then evaluated against the `tmp_events` table in parallel.
 
-	This approach is quite similar to Hasura's streaming subscription model, which you can read more about [here](https://github.com/hasura/graphql-engine/blob/master/architecture/streaming-subscriptions.md?ref=highscalability.com).
+	This approach is quite similar to Hasura's streaming subscription model, which you can read more about [here](https://github.com/hasura/graphql-engine/blob/master/architecture/streaming-subscriptions.md).
 4. Finally, the filtered events, with their relevant subscription IDs, are sent to the device. The device is expected to then process these events and forward them to relevant clients.
 
 "devices" also mark themselves as "active" by updating their last ping time in the `active_devices` table periodically using the `mark_device_active` fn.

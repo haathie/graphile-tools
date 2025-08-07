@@ -10,8 +10,8 @@ import { schemaFieldsHook } from './schema-fields.ts'
 import { schemaInitHook } from './schema-init.ts'
 import { DEBUG } from './utils.ts'
 
-export const FancySubscriptionsPlugin: GraphileConfig.Plugin = {
-	name: 'FancySubscriptionsPlugin',
+export const PgRealtimePlugin: GraphileConfig.Plugin = {
+	name: 'PgRealtimePlugin',
 	inflection: inflection,
 	schema: {
 		behaviorRegistry: {
@@ -35,7 +35,7 @@ export const FancySubscriptionsPlugin: GraphileConfig.Plugin = {
 				{
 					resolvedPreset: {
 						pgServices = [],
-						subscriptions: {
+						pgRealtime: {
 							deviceId,
 							readChunkSize,
 							pollIntervalMs
@@ -94,8 +94,13 @@ export const FancySubscriptionsPlugin: GraphileConfig.Plugin = {
 					sleepDurationMs: pollIntervalMs,
 					chunkSize: readChunkSize,
 				})
-				await src.listen()
-				DEBUG('Subscriptions source initialized.')
+				try {
+					await src.listen()
+					DEBUG('Subscriptions source initialized.')
+				} catch(err) {
+					console.error('Error initializing subscriptions source:', err)
+					throw err
+				}
 
 				return next()
 			}

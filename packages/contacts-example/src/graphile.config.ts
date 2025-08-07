@@ -1,8 +1,8 @@
 import { PgSimplifyInflectionPreset } from '@graphile/simplify-inflection'
 import { FancyConditionsPlugin } from '@haathie/fancy-conditions'
 import { FancyMutationsPlugin } from '@haathie/postgraphile-fancy-mutations'
-import { FancySubscriptionsPlugin } from '@haathie/postgraphile-fancy-subscriptions'
 import { RateLimitsPlugin } from '@haathie/postgraphile-rate-limits'
+import { PgRealtimePlugin } from '@haathie/postgraphile-realtime'
 import { ReasonableLimitsPlugin } from '@haathie/postgraphile-reasonable-limits'
 import { makePgService } from 'postgraphile/adaptors/pg'
 // The standard base preset to use, includes the main PostGraphile features
@@ -14,7 +14,7 @@ const preset: GraphileConfig.Preset = {
 		PgSimplifyInflectionPreset
 	],
 	plugins: [
-		FancySubscriptionsPlugin,
+		PgRealtimePlugin,
 		ReasonableLimitsPlugin,
 		FancyMutationsPlugin,
 		FancyConditionsPlugin,
@@ -67,7 +67,7 @@ const preset: GraphileConfig.Preset = {
 			schemas: ['app'],
 		}),
 	],
-	subscriptions: {
+	pgRealtime: {
 		deviceId: process.env.DEVICE_ID || 'default-device',
 		pollIntervalMs: 500
 	},

@@ -60,11 +60,11 @@ export class SubscriptionManager {
 
 	static #current: SubscriptionManager | undefined
 
-	deviceId: string
-	chunkSize: number
-	sleepDurationMs: number
+	readonly deviceId: string
+	readonly chunkSize: number
+	readonly sleepDurationMs: number
+	readonly pool: Pool
 
-	#pool: Pool
 	#closed = false
 	#subscribers: { [topic: string]: Writable } = {}
 	#readLoopPromise?: Promise<void>
@@ -76,12 +76,12 @@ export class SubscriptionManager {
 	constructor({
 		pool,
 		deviceId,
-		sleepDurationMs = 250,
+		sleepDurationMs = 500,
 		chunkSize = 1000
 	}: SubscriptionManagerOptions) {
 		this.deviceId = deviceId
 		this.sleepDurationMs = sleepDurationMs
-		this.#pool = pool
+		this.pool = pool
 		this.chunkSize = chunkSize
 	}
 
@@ -151,7 +151,7 @@ export class SubscriptionManager {
 		} else {
 			params.push(topic.schema, topic.table, topic.kind)
 			values.push(
-				`postgraphile_meta.create_topic(
+				`postg_realtime.create_topic(
 					$${params.length - 2}::varchar,
 					$${params.length - 1}::varchar,
 					$${params.length}::varchar
@@ -186,7 +186,7 @@ export class SubscriptionManager {
 		params.push(additionalData)
 		values.push(`$${params.length}::jsonb`)
 
-		const sql = `INSERT INTO postgraphile_meta.subscriptions(
+		const sql = `INSERT INTO postg_realtime.subscriptions(
 			topic,
 			conditions_sql,
 			conditions_params,
@@ -253,8 +253,8 @@ export class SubscriptionManager {
 			}
 
 			try {
-				await this.#pool.query(
-					'DELETE FROM postgraphile_meta.subscriptions WHERE id = $1',
+				await this.pool.query(
+					'DELETE FROM postg_realtime.subscriptions WHERE id = $1',
 					[subscriptionId]
 				)
 				DEBUG(`Deleted subscription: ${subscriptionId}`)
@@ -273,12 +273,12 @@ export class SubscriptionManager {
 	 * @param tableNames eg. ['public.my_table', 'public.my_other_table']
 	 */
 	async makeSubscribable(...tableNames: string[]) {
-		const conn = await this.#pool.connect()
+		const conn = await this.pool.connect()
 		try {
 			await conn.query('BEGIN')
 			for(const tableName of tableNames) {
 				await conn.query(
-					'SELECT postgraphile_meta.make_subscribable($1::regclass)',
+					'SELECT postg_realtime.make_subscribable($1::regclass)',
 					[tableName]
 				)
 			}
@@ -302,8 +302,8 @@ export class SubscriptionManager {
 		}
 
 		const now = Date.now()
-		const { rows } = await this.#pool.query(
-			'SELECT * FROM postgraphile_meta.get_events_for_subscriptions($1, $2)',
+		const { rows } = await this.pool.query(
+			'SELECT * FROM postg_realtime.get_events_for_subscriptions($1, $2)',
 			[this.deviceId, this.chunkSize]
 		)
 
@@ -343,7 +343,7 @@ export class SubscriptionManager {
 	}
 
 	runDdlIfRequired() {
-		return runDdlIfRequired(this.#pool)
+		return runDdlIfRequired(this.pool)
 	}
 
 	release() {
@@ -386,20 +386,20 @@ export class SubscriptionManager {
 	}
 
 	async #pingDevice() {
-		await this.#pool.query(
-			'SELECT postgraphile_meta.mark_device_active($1)',
+		await this.pool.query(
+			'SELECT postg_realtime.mark_device_active($1)',
 			[this.deviceId]
 		)
 	}
 
 	async maintainEventsTable() {
-		await this.#pool.query('SELECT postgraphile_meta.maintain_events_table()')
+		await this.pool.query('SELECT postg_realtime.maintain_events_table()')
 	}
 
 	async clearTempSubscriptions() {
 		// clear all temp subscriptions for this device
-		await this.#pool.query(
-			'SELECT postgraphile_meta.remove_temp_subscriptions($1)',
+		await this.pool.query(
+			'SELECT postg_realtime.remove_temp_subscriptions($1)',
 			[this.deviceId]
 		)
 	}
@@ -435,17 +435,17 @@ async function runDdlIfRequired(pgPool: Pool) {
 	// check if the schema exists
 	const { rows } = await pgPool.query(
 		'SELECT 1 FROM pg_namespace WHERE nspname = $1',
-		['postgraphile_meta']
+		['postg_realtime']
 	)
 	if(rows.length) {
-		DEBUG('Schema postgraphile_meta already exists, skipping DDL.')
+		DEBUG('Schema postg_realtime already exists, skipping DDL.')
 		return
 	}
 
-	DEBUG('Running DDL for postgraphile_meta schema...')
+	DEBUG('Running DDL for postg_realtime schema...')
 	const ddlFilename
-		= join(import.meta.dirname, '../sql/fancy-subscriptions.sql')
+		= join(import.meta.dirname, '../sql/postg_realtime.sql')
 	const ddl = await readFile(ddlFilename, 'utf8')
 	await pgPool.query(`BEGIN;\n${ddl};\nCOMMIT;`)
-	DEBUG('DDL for postgraphile_meta schema completed.')
+	DEBUG('DDL for postg_realtime schema completed.')
 }
