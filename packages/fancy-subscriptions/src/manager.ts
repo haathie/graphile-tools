@@ -103,15 +103,10 @@ export class SubscriptionManager {
 			return
 		}
 
-		await runDdlIfRequired(this.#pool)
-		// clear all temp subscriptions for this device
-		await this.#pool.query(
-			'SELECT postgraphile_meta.remove_temp_subscriptions($1)',
-			[this.deviceId]
-		)
-
+		await this.runDdlIfRequired()
+		await this.maintainEventsTable()
 		await this.#pingDevice()
-		await this.#maintainEventsTable()
+		await this.clearTempSubscriptions()
 
 		this.#readLoopPromise = this.#startReadLoop()
 
@@ -127,7 +122,7 @@ export class SubscriptionManager {
 		clearInterval(this.#maintenanceInterval)
 		this.#maintenanceInterval = setInterval(async() => {
 			try {
-				await this.#maintainEventsTable()
+				await this.maintainEventsTable()
 			} catch(e) {
 				console.error('Error maintaining events table:', e)
 			}
@@ -211,10 +206,10 @@ export class SubscriptionManager {
 	 * Returns an async iterator that yields PgChangeEvent objects.
 	 * @param deleteOnClose Delete the subscription when the stream closes.
 	 */
-	async subscribe(
+	subscribe(
 		subscriptionId: string | number,
 		deleteOnClose: boolean
-	): Promise<AsyncIterableIterator<PgChangeEvent>> {
+	): AsyncIterableIterator<PgChangeEvent> {
 		if(this.#closed) {
 			throw new Error('Source already closed.')
 		}
@@ -253,18 +248,20 @@ export class SubscriptionManager {
 			DEBUG(`Stream closed for subscriptionId: ${subscriptionId}`)
 			delete this.#subscribers[subscriptionId]
 
-			if(deleteOnClose) {
-				try {
-					await this.#pool.query(
-						'DELETE FROM postgraphile_meta.subscriptions WHERE id = $1',
-						[subscriptionId]
-					)
-					DEBUG(`Deleted subscription: ${subscriptionId}`)
-				} catch(e: any) {
-					console.error(
-						`Error deleting subscription ${subscriptionId}:`, e
-					)
-				}
+			if(!deleteOnClose) {
+				return
+			}
+
+			try {
+				await this.#pool.query(
+					'DELETE FROM postgraphile_meta.subscriptions WHERE id = $1',
+					[subscriptionId]
+				)
+				DEBUG(`Deleted subscription: ${subscriptionId}`)
+			} catch(e: any) {
+				console.error(
+					`Error deleting subscription ${subscriptionId}:`, e
+				)
 			}
 		}
 	}
@@ -320,33 +317,33 @@ export class SubscriptionManager {
 		}
 
 		const subs = Object.entries(subToEventMap)
-		await Promise.all(subs.map(async([subId, items]) => {
+		for(const [subId, items] of subs) {
 			const stream = this.#subscribers[subId]
 			if(!stream) {
 				DEBUG(`No stream found for subscriptionId: ${subId}`)
-				return
+				continue
 			}
 
-			await new Promise<void>(resolve => {
-				const msg: PgChangeEvent = { eventId: items.at(-1)!.id, items }
-				stream.write(msg, err => {
-					if(err) {
-						DEBUG(`Error writing to stream for ${subId}:`, err)
-					}
-
-					resolve()
-				})
+			const msg: PgChangeEvent = { eventId: items.at(-1)!.id, items }
+			stream.write(msg, err => {
+				if(err) {
+					DEBUG(`Error writing to stream for ${subId}:`, err)
+				}
 			})
-		}))
+		}
 
 		if(rows.length) {
-			DEBUG(
+			console.log(
 				`Read ${rows.length} events from db to ${subs.length} subs in`
 				+ ` ${Date.now() - now}ms, ${this.#eventsPublished} total events published`
 			)
 		}
 
 		return rows.length
+	}
+
+	runDdlIfRequired() {
+		return runDdlIfRequired(this.#pool)
 	}
 
 	release() {
@@ -395,8 +392,16 @@ export class SubscriptionManager {
 		)
 	}
 
-	async #maintainEventsTable() {
+	async maintainEventsTable() {
 		await this.#pool.query('SELECT postgraphile_meta.maintain_events_table()')
+	}
+
+	async clearTempSubscriptions() {
+		// clear all temp subscriptions for this device
+		await this.#pool.query(
+			'SELECT postgraphile_meta.remove_temp_subscriptions($1)',
+			[this.deviceId]
+		)
 	}
 
 	static init(options: SubscriptionManagerOptions) {

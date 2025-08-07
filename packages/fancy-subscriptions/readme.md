@@ -74,13 +74,6 @@ subscription UpdatedContacts {
 }
 ```
 
-To remove the subscribable behaviour from a table, you must:
-1. remove the behaviour from the table
-2. run the following SQL to remove the trigger and function:
-``` sql
-select fancy_subscriptions.remove_subscribable('app.contacts');
-```
-
 ### Adding Security to Subscriptions
 
 Subscriptions can be secured using an RLS policy. In the example above, we want to ensure that the subscription only returns contacts for a specific organization. We can do this by adding an RLS policy to the `contacts` table:
@@ -106,6 +99,17 @@ WITH CHECK (
 ```
 
 Note: the plugin will automatically give the `app_user` role access to create subscriptions, so you don't need to add a separate grant for that.
+
+## Caveats
+
+1. To remove the subscribable behaviour from a table, you must:
+	- remove the behaviour from the table
+	- run the following SQL to remove the trigger and function:
+	``` sql
+	SELECT fancy_subscriptions.remove_subscribable('app.contacts');
+	```
+2. Each "device" or worker that reads events maintains a cursor of the latest event its read from the `events` table. To avoid missing events from ongoing transactions that get committed after the cursor is set, the plugin only reads events that are older than the start of the oldest transaction modifying the `events` table.
+A consquence of this is that if a transaction is long-running, the device will not read any new events until the transaction is committed. This can lead to delays in processing events.
 
 ## Internal Workings
 
