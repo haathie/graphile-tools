@@ -130,6 +130,21 @@ Note: if the plugin isn't running -- then the `maintain_events_table` function w
 ### Fanning Out Events
 
 To put it all together, "events" are sent to relevant subscriptions by
-"devices" that periodically read from this table and send changes to clients using the `get_events_for_subscriptions`. 
+"devices" that periodically read from this table and send changes to clients using the `get_events_for_subscriptions`. This function is the core of the plugin. A high level overview of how it works:
+1. The device finds all events whose ID is greater than the latest event ID it has processed from the `active_devices` table, and less than the start of the oldest transaction modifying the `events` table. This ensures that it doesn't miss any events that were committed after it set its cursor. These events are transferred to a temporary table -- `tmp_events`.
+2. It then finds all subscriptions that are active for the device, groups by their SQL condition
+3. For each subscription SQL condition, it'll execute the condition against the `tmp_events` table to filter the events that match the condition. This is highly efficient as we only execute the condition once per SQL condition -- so even if there are hundreds of thousands of subscriptions, the condition is only executed once per unique condition. Eg. of this grouping is:
+	Let's say we've 4 subscriptions with the following conditions:
+	```
+	1 - "e.row_data->>'orgId' = s.conditions_params[1]", ["org1"]
+	2 - "e.row_data->>'orgId' = s.conditions_params[1]", ["org2"]
+	3 - "e.row_data->>'id' = s.conditions_params[1]", ["id1"]
+	4 - "e.row_data->>'id' = s.conditions_params[1]", ["id2"]
+	```
+	(just for clarity, `e` is the event, `s` is the subscription)
+	In the case above, these 4 subscriptions will be grouped into 2 unique conditions, i.e. `"e.row_data->>'orgId' = s.conditions_params[1]"` and `"e.row_data->>'id' = s.conditions_params[1]"`. Both of these conditions are then evaluated against the `tmp_events` table in parallel.
 
-"devices" also mark themselves as "active" by updating their last ping time in the `devices` table periodically using the `mark_device_active` fn.
+	This approach is quite similar to Hasura's streaming subscription model, which you can read more about [here](https://github.com/hasura/graphql-engine/blob/master/architecture/streaming-subscriptions.md?ref=highscalability.com).
+4. Finally, the filtered events, with their relevant subscription IDs, are sent to the device. The device is expected to then process these events and forward them to relevant clients.
+
+"devices" also mark themselves as "active" by updating their last ping time in the `active_devices` table periodically using the `mark_device_active` fn.

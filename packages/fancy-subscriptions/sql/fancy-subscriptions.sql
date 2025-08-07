@@ -480,7 +480,8 @@ BEGIN
 			)
 			AND relname LIKE (table_name || '_%')
 			AND relkind = 'r'
-			AND relnamespace = (SELECT oid FROM pg_namespace WHERE nspname = schema_name)
+			AND relnamespace 
+				= (SELECT oid FROM pg_namespace WHERE nspname = schema_name)
 	) LOOP
 		EXECUTE format('DROP TABLE IF EXISTS %I.%I', schema_name, p_info.relname);
 	END LOOP;
