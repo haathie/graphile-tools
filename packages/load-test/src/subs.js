@@ -89,20 +89,31 @@ export default async function() {
 			}
 		},
 		msg => {
-			const itemsRecv = msg.payload.data.contactsCreated.items
+			const itemsRecv = msg?.payload?.data?.contactsCreated?.items
+			if(typeof itemsRecv === 'undefined') {
+				console.error('Received undefined items from subscription:', JSON.stringify(msg, null, 2))
+				return
+			}
+
 			// console.log(`Received items: ${itemsRecv.length}`, itemsRecv.map(i => i.orgId))
-			msgReceived += itemsRecv.length
+			msgReceived += itemsRecv?.length || 0
 			check(
 				itemsRecv,
 				{
-					'sub has data': m => !!m.length
+					'sub has data': m => !!m?.length
 				}
 			)
 		}
 	)
 
-	while(!ws.connected) {
-		await sleep(100)
+	const isWsConnected = await conditionalTimeout(() => ws.connected)
+	check(isWsConnected, {
+		'ws connected': (v) => v === true
+	})
+
+	if(!ws.connected) {
+		console.error('WebSocket connection failed')
+		return
 	}
 
 	// wait for the subscription to be established
@@ -125,14 +136,7 @@ export default async function() {
 		contactsCreated += 1
 	}
 
-	const start = Date.now()
-	while(
-		msgReceived < contactsCreated
-		// timeout after few s
-		&& (Date.now() - start) < MAX_SUB_DELAY_MS
-	) {
-		await sleep(100)
-	}
+	await conditionalTimeout(() => msgReceived >= contactsCreated, MAX_SUB_DELAY_MS)
 
 	ws.close()
 	check(msgReceived, { 'data received on sub': v => v === contactsCreated })
@@ -188,6 +192,23 @@ function subscribe({ headers, ...opts }, onMessage) {
 	}
 
 	return ws
+}
+
+async function conditionalTimeout(
+	checkFn,
+	timeoutMs = 5000,
+	pollIntervalMs = 100
+) {
+	const start = Date.now()
+	while(!checkFn()) {
+		if(Date.now() - start > timeoutMs) {
+			return false
+		}
+
+		await sleep(pollIntervalMs)
+	}
+
+	return true
 }
 
 function sleep(ms) {
