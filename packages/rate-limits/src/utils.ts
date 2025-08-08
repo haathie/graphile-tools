@@ -52,6 +52,7 @@ export async function executeRateLimitsDdl(
 			continue
 		}
 
+		ddl += `GRANT USAGE ON SCHEMA "{{schema_name}}" TO "${role}";\n`
 		ddl += `GRANT SELECT, INSERT, UPDATE, DELETE ON
 			"{{schema_name}}"."{{table_name}}" TO "${role}";\n`
 	}
