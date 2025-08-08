@@ -32,6 +32,11 @@ export const config = {
 		// can increase this to improve throughput, at the cost of more
 		// resource usage
 		readChunkSize: 1000,
+		// Add roles here that will be granted access to create subscriptions.
+		// By default, the role doing introspection will be granted access.
+		subscribableRoles: [
+			'some_role'
+		]
 	}
 }
 ```

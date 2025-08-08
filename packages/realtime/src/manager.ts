@@ -333,7 +333,7 @@ export class SubscriptionManager {
 		}
 
 		if(rows.length) {
-			console.log(
+			DEBUG(
 				`Read ${rows.length} events from db to ${subs.length} subs in`
 				+ ` ${Date.now() - now}ms, ${this.#eventsPublished} total events published`
 			)

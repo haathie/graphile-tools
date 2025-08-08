@@ -38,7 +38,8 @@ export const PgRealtimePlugin: GraphileConfig.Plugin = {
 						pgRealtime: {
 							deviceId,
 							readChunkSize,
-							pollIntervalMs
+							pollIntervalMs,
+							subscribableRoles = []
 						} = {}
 					}
 				}
@@ -55,6 +56,7 @@ export const PgRealtimePlugin: GraphileConfig.Plugin = {
 				}
 
 				let superuserPool: Pool | undefined
+				let introspectionRole: string | undefined
 				for(const service of pgServices) {
 					superuserPool = service.adaptorSettings?.superuserPool
 					if(!superuserPool) {
@@ -81,6 +83,8 @@ export const PgRealtimePlugin: GraphileConfig.Plugin = {
 						await release?.(...args)
 					}
 
+					introspectionRole = service.pgSettingsForIntrospection?.role
+
 					break
 				}
 
@@ -94,12 +98,24 @@ export const PgRealtimePlugin: GraphileConfig.Plugin = {
 					sleepDurationMs: pollIntervalMs,
 					chunkSize: readChunkSize,
 				})
-				try {
-					await src.listen()
-					DEBUG('Subscriptions source initialized.')
-				} catch(err) {
-					console.error('Error initializing subscriptions source:', err)
-					throw err
+				await src.listen()
+				DEBUG('Subscriptions source initialized.')
+
+				const rolesToGiveAccessTo = [
+					...subscribableRoles,
+					introspectionRole
+				]
+
+				for(const role of rolesToGiveAccessTo) {
+					if(!role) {
+						continue
+					}
+
+					await superuserPool.query({
+						text: ACCESS_DDL.replaceAll('<username>', role)
+					})
+
+					DEBUG(`Granted access to ${role}`)
 				}
 
 				return next()
@@ -112,3 +128,21 @@ function getCleanedDeviceId(deviceId: string) {
 	// Remove any non-alphanumeric characters and convert to lowercase
 	return deviceId.replace(/[^a-z0-9\_]/gi, '').toLowerCase()
 }
+
+const ACCESS_DDL = `
+BEGIN;
+GRANT USAGE, CREATE ON SCHEMA postg_realtime TO "<username>";
+GRANT
+	SELECT,
+	INSERT(
+		topic,
+		type,
+		additional_data,
+		conditions_sql,
+		conditions_params,
+		is_temporary,
+		diff_only_fields
+	),
+	DELETE
+ON postg_realtime.subscriptions TO "<username>";
+COMMIT;`

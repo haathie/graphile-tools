@@ -22,6 +22,12 @@ declare global {
 				 * @default 500
 				 */
 				pollIntervalMs?: number
+
+				/**
+				 * Roles that will be granted access to create subscriptions.
+				 * By default, the introspection role will be granted access.
+				 */
+				subscribableRoles?: string[]
 			}
 		}
 	}
