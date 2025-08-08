@@ -1,7 +1,7 @@
 # Postgraphile Realtime
 
 Plugin to enable realtime subscriptions for any table. This plugin creates a trigger to capture changes for any table, using no other dependencies, and subscribe to those changes using GraphQL subscriptions.
-The plugin is quite performant and can handle large datasets efficiently. It doesn't rely on logical replication as large txs can significantly slow down the replication stream.
+The plugin is quite performant and can handle large datasets efficiently. It doesn't rely on logical replication as large txs can significantly slow down the replication stream. Basic benchmarks given below.
 
 Note: this will modify your database by adding a `postg_realtime` schema, all tables/fns related to the plugin are stored there.
 
@@ -115,6 +115,28 @@ Note: the plugin will automatically give the `app_user` role access to create su
 	```
 2. Each "device" or worker that reads events maintains a cursor of the latest event its read from the `events` table. To avoid missing events from ongoing transactions that get committed after the cursor is set, the plugin only reads events that are older than the start of the oldest transaction modifying the `events` table.
 A consquence of this is that if a transaction is long-running, the device will not read any new events until the transaction is committed. This can lead to delays in processing events.
+
+## Benchmarks
+
+Benchmarks done on a MacBook Pro M2, with a single NodeJS process running the plugin, and Postgres 17 with 2 cores, 4GB RAM. Pretty basic setup, but shows that the plugin can handle pretty substantial throughput, greater than what most applications end up needing.
+
+### Pure Postgres
+
+A [simple benchmark](tests/pg.bench.ts) to measure the time taken for Postgres to process events and send them to subscribers. This is unrelated to Graphile, and just measures the performance of the core Postgres code.
+
+The benchmark creates 60,000 concurrent subscriptions of 4 different types, and then sends one event to each subscription. We then measure the time taken from the tx to insert the event, to the time the subscriber receives the event.
+```
+60000 events processed in 7387ms, 8122 events/sec
+Latency for 60000 events, avg: 650.42ms, max: 1594ms, min: 24ms
+```
+
+### K6
+
+This is [a load test](../load-test/src/subs.js), and tests the performance of the whole system including Graphile. It uses [K6](https://k6.io/) to simulate a load of 5,000 concurrent subscriptions of the same type. There's 1 unique event per subscription, and we check if the subscription receives it within 5s of sending the event.
+Some WebSocket connections eventually get dropped due to the load, but the plugin is able to dish out events to the remaining subscribers without any issues & eventually completes 20,000 subscriptions of the test in 30s.
+```
+20050 complete and 145 interrupted iterations
+```
 
 ## Internal Workings
 

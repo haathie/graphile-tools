@@ -146,11 +146,22 @@ async function bench() {
 	}
 
 	const shuffledBenches = chance.shuffle(createBenches)
+
+	const now = Date.now()
 	const rslts = await Promise.all(shuffledBenches.map(b => b()))
+	console.log(
+		`${rslts.length} events processed in ${Date.now() - now}ms`
+		+ `, ${Math.round(rslts.length / ((Date.now() - now) / 1000))} events/sec`
+	)
 
 	const avg = rslts.reduce((acc, { ms }) => acc + ms, 0) / rslts.length
-	console.log(`Average latency for ${rslts.length} events: ${avg.toFixed(2)}ms`)
+	console.log(
+		`Latency for ${rslts.length} events, avg: ${avg}ms`
+		+ `, max: ${Math.max(...rslts.map(r => r.ms))}ms`
+		+ `, min: ${Math.min(...rslts.map(r => r.ms))}ms`
+	)
 
+	// check the latency for a single event after all this has run
 	const norms = await shuffledBenches[0]()
 	console.log(`single latency: ${norms.ms}ms for matcher ${norms.matcherIdx}`)
 
