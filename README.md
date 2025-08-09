@@ -12,10 +12,6 @@ TODOs:
 ## Setup
 
 1. Install deps: `npm i`
-	- Note: this uses public GH packages, so you'll need to have GH packages authenticated. If not, run:
-	```sh
-	npm login --registry=https://npm.pkg.github.com
-	```
 2. Bootstrap the dev environment:
 	```sh
 	sh scripts/bootstrap-dev.sh

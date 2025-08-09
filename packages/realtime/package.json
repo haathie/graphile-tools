@@ -5,8 +5,12 @@
 	"files": ["lib", "sql"],
 	"main": "lib/index.js",
 	"types": "lib/index.d.ts",
+	"publishConfig": {
+		"access": "public"
+	},
 	"scripts": {
-		"build": "tsc -p tsconfig.json"
+		"build": "tsc -p tsconfig.json",
+		"prepack": "npm run build"
 	},
 	"dependencies": {
 		"@haathie/postgraphile-common-utils": "^0.1.0",

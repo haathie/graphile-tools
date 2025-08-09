@@ -1,6 +1,6 @@
 {
 	"name": "@haathie/postgraphile-common-utils",
-	"version": "0.1.0",
+	"version": "0.1.1",
 	"type": "module",
 	"files": ["lib"],
 	"exports": {
@@ -8,7 +8,7 @@
 		"./tests": { "import": "./tests/index.ts" } 
 	},
 	"publishConfig": {
-    "registry": "https://npm.pkg.github.com",
+    "registry": "https://registry.npmjs.org",
 		"access": "public"
   },
 	"repository": {
@@ -16,7 +16,8 @@
     "url": "https://github.com/haathie/graphile-tools.git"
   },
 	"scripts": {
-		"build": "tsc -p tsconfig.json"
+		"build": "tsc -p tsconfig.json",
+		"prepack": "npm run build"
 	},
 	"peerDependencies": {
 		"postgraphile": "*"
