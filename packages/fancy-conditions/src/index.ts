@@ -1,8 +1,10 @@
-import { FILTER_METHODS, FILTER_METHODS_CONFIG, FILTER_TYPES_MAP } from './filters.ts'
+export * from './filter-implementations/declaration.ts'
+
+import { FILTER_METHODS_CONFIG, FILTER_TYPES_MAP } from './filter-implementations/index.ts'
 import { inflection } from './inflection.ts'
 import { fields } from './schema-fields.ts'
 import { init } from './schema-init.ts'
-import type { FilterType } from './types.ts'
+import type { FilterMethod, FilterType } from './types.ts'
 
 type BehaviourMap = Partial<Record<keyof GraphileBuild.BehaviorStrings, {
 	description: string
@@ -27,11 +29,11 @@ export const FancyConditionsPlugin: GraphileConfig.Plugin = {
 					},
 					{} as BehaviourMap
 				),
-				...FILTER_METHODS.reduce(
-					(acc, filterMethod) => {
-						const name = `filterMethod:${filterMethod}` as const
+				...Object.entries(FILTER_METHODS_CONFIG).reduce(
+					(acc, [filterMethod, { description }]) => {
+						const name = `filterMethod:${filterMethod as FilterMethod}` as const
 						acc[name] = {
-							description: FILTER_METHODS_CONFIG[filterMethod].description
+							description: description
 								|| `Allow filtering this field using ${filterMethod} operators`,
 							entities: ['pgCodecAttribute'],
 						}
@@ -40,7 +42,7 @@ export const FancyConditionsPlugin: GraphileConfig.Plugin = {
 					},
 					{} as BehaviourMap
 				)
-			}
+			},
 		},
 		hooks: {
 			build(build) {

@@ -1,7 +1,7 @@
 import type { PgCodec, PgCodecWithAttributes } from 'postgraphile/@dataplan/pg'
 import type { GraphQLInputType } from 'postgraphile/graphql'
-import { FILTER_TYPES_MAP } from './filters.ts'
-import type { FilterType } from './types.ts'
+import { FILTER_METHODS_CONFIG, FILTER_TYPES_MAP } from './filter-implementations/index.ts'
+import type { FilterMethod, FilterType } from './types.ts'
 
 export function getBuildGraphQlTypeByCodec(
 	codec: PgCodec,
@@ -33,5 +33,24 @@ export function *getFilterTypesForAttribute(
 		}
 
 		yield filterType
+	}
+}
+
+
+export function *getFilterMethodsForAttribute(
+	pgCodec: PgCodecWithAttributes,
+	attrName: string,
+	{ behavior }: GraphileBuild.Build
+) {
+	for(const _method in FILTER_METHODS_CONFIG) {
+		const method = _method as FilterMethod
+		if(
+			!behavior
+				.pgCodecAttributeMatches([pgCodec, attrName], `filterMethod:${method}`)
+		) {
+			continue
+		}
+
+		yield method
 	}
 }

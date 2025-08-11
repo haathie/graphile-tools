@@ -3,21 +3,14 @@ import type { PgCodec, PgCodecAttribute, PgCondition, PgResource } from 'postgra
 import type { InputObjectFieldApplyResolver } from 'postgraphile/grafast'
 import type { GraphQLInputType } from 'postgraphile/graphql'
 
-export type FilterType = 'eq'
-	| 'eqIn'
-	| 'range'
-	| 'icontains'
+export type FilterType = keyof GraphileBuild.FilterTypeMap
 
-/**
- * Method used to apply filters -- useful for different index types like
- * GIN, paradedb, zombodb, etc.
- */
-export type FilterMethod = 'paradedb'
+export type FilterMethod = keyof GraphileBuild.FilterMethodMap
 
-type ApplyBuilder = (
-	attrName: string,
+export type FilterApply = InputObjectFieldApplyResolver<PgCondition, any, {
+	attrName: string
 	attr: PgCodecAttribute
-) => InputObjectFieldApplyResolver<PgCondition>
+}>
 
 export type FilterImplementation = {
 	description?: string
@@ -37,9 +30,12 @@ export type FilterImplementation = {
 		getGraphQlType: () => GraphQLInputType,
 		build: GraphileBuild.Build
 	): GraphQLInputType
-	buildApplys: {
-		default: ApplyBuilder
-	} & { [M in FilterMethod]?: ApplyBuilder }
+	applys?: { [M in FilterMethod]?: FilterApply }
+}
+
+export type FilterMethodConfig = {
+	description?: string
+	supportedOnSubscription: boolean
 }
 
 interface FilterBehaviours extends
@@ -49,7 +45,30 @@ interface FilterBehaviours extends
 }
 
 declare global {
+
 	namespace GraphileBuild {
+
+		interface FilterTypeMap {
+			eq: true
+			eqIn: true
+			range: true
+			icontains: true
+		}
+
+		/**
+		 * Method used to apply filters -- useful for different index types like
+		 * GIN, paradedb, zombodb, etc.
+		 */
+		interface FilterMethodMap {
+		}
+
+		interface FilterTypeMap {
+			eq: true
+			eqIn: true
+			range: true
+			icontains: true
+		}
+
 		interface BehaviorStrings	extends FilterBehaviours {}
 
 		interface Inflection {
@@ -67,19 +86,6 @@ declare global {
 
 		interface ScopeInputObjectFieldsField {
 			isConditionContainer?: boolean
-		}
-	}
-}
-
-export type FilterMethodConfig = {
-	description?: string
-	supportedOnSubscription: boolean
-}
-
-declare global {
-	namespace GraphileBuild {
-		interface Build {
-			inputConditionTypes: { [key: string]: GraphQLInputType }
 		}
 	}
 }
