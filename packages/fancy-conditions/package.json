@@ -3,16 +3,22 @@
 	"version": "0.1.0",
 	"type": "module",
 	"files": ["lib"],
-	"exports": {
-		".": {
-			"import": "./src/index.ts"
-		},
-		"./package.json": "./package.json"
+	"main": "lib/index.js",
+	"types": "lib/index.d.ts",
+	"publishConfig": {
+		"access": "public"
+	},
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/haathie/graphile-tools.git"
 	},
 	"scripts": {
 		"build": "tsc -p tsconfig.json"
 	},
 	"dependencies": {
 		"@haathie/postgraphile-common-utils": "*"
+	},
+	"peerDependencies": {
+		"postgraphile": "*"
 	}
 }

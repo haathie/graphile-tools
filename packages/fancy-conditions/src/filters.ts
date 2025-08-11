@@ -1,49 +1,6 @@
-import { type PgCodecAttribute, PgCondition } from 'postgraphile/@dataplan/pg'
-import { type InputObjectFieldApplyResolver } from 'postgraphile/grafast'
-import { GraphQLInputObjectType, type GraphQLInputType, GraphQLList, GraphQLNonNull, GraphQLScalarType } from 'postgraphile/graphql'
+import { GraphQLList, GraphQLNonNull, GraphQLScalarType } from 'postgraphile/graphql'
 import { sql } from 'postgraphile/pg-sql2'
-
-export type FilterType = 'eq'
-	| 'eqIn'
-	| 'range'
-	| 'icontains'
-
-/**
- * Method used to apply filters -- useful for different index types like
- * GIN, paradeb, etc.
- */
-export type FilterMethod = 'paradedb'
-
-type ApplyBuilder = (
-	attrName: string,
-	attr: PgCodecAttribute
-) => InputObjectFieldApplyResolver<PgCondition>
-
-type FilterTypeImpl = {
-	buildType: (
-		fieldType: GraphQLInputType,
-		inflection: GraphileBuild.Inflection
-	) => GraphQLInputType
-	buildApplys: {
-		default: ApplyBuilder
-	} & { [M in FilterMethod]?: ApplyBuilder }
-}
-
-interface FilterBehaviours extends
-	Record<`filterType:${FilterType}`, true>,
-	Record<`filterMethod:${FilterMethod}`, true> {
-	'searchable': true
-}
-
-declare global {
-	namespace GraphileBuild {
-		interface BehaviorStrings	extends FilterBehaviours {}
-	}
-}
-
-type FilterMethodConfig = {
-	supportedOnSubscription: boolean
-}
+import type { FilterImplementation, FilterMethod, FilterMethodConfig, FilterType } from './types.ts'
 
 export const FILTER_METHODS_CONFIG: { [K in FilterMethod]: FilterMethodConfig } = {
 	'paradedb': {
@@ -53,9 +10,12 @@ export const FILTER_METHODS_CONFIG: { [K in FilterMethod]: FilterMethodConfig } 
 
 export const FILTER_METHODS = Object.keys(FILTER_METHODS_CONFIG) as FilterMethod[]
 
-export const FILTER_TYPES_MAP: { [K in FilterType]: FilterTypeImpl } = {
+export const FILTER_TYPES_MAP: { [K in FilterType]: FilterImplementation } = {
 	'eq': {
-		buildType: fieldType => fieldType,
+		getType(codec, getGraphQlType) {
+			// for eq -- we just return the field type
+			return getGraphQlType()
+		},
 		buildApplys: {
 			default(attrName, attr) {
 				return (cond, input) => {
@@ -72,9 +32,8 @@ export const FILTER_TYPES_MAP: { [K in FilterType]: FilterTypeImpl } = {
 						)
 					}
 
-					return cond.where(
-						sql`${id} = ${sql.value(input)}::${codec.sqlType}`
-					)
+					return cond
+						.where(sql`${id} = ${sql.value(input)}::${codec.sqlType}`)
 				}
 			},
 			paradedb(attrName, attr) {
@@ -93,7 +52,9 @@ export const FILTER_TYPES_MAP: { [K in FilterType]: FilterTypeImpl } = {
 		}
 	},
 	'eqIn': {
-		buildType: fieldType => new GraphQLList(fieldType),
+		getType(codec, getGraphQlType) {
+			return new GraphQLList(getGraphQlType())
+		},
 		buildApplys: {
 			default(attrName, attr) {
 				return (cond, input) => {
@@ -110,9 +71,7 @@ export const FILTER_TYPES_MAP: { [K in FilterType]: FilterTypeImpl } = {
 						return cond.where(whereClause)
 					}
 
-					return cond.where(
-						sql`(${whereClause} OR ${id} IS NULL)`
-					)
+					return cond.where(sql`(${whereClause} OR ${id} IS NULL)`)
 				}
 			},
 			paradedb(attrName, attr) {
@@ -138,21 +97,27 @@ export const FILTER_TYPES_MAP: { [K in FilterType]: FilterTypeImpl } = {
 		}
 	},
 	'range': {
-		buildType: (fieldType, inflection) => {
-			if(!('name' in fieldType)) {
-				throw new Error('Cannot build range condition on a non-named type')
-			}
+		getRegisterTypeInfo(fieldCodec, getGraphQlType, { inflection }) {
+			return {
+				name: inflection.rangeConditionTypeName(fieldCodec),
+				spec: () => ({
+					description: 'Filter values falling in a range',
+					fields() {
+						const fieldType = getGraphQlType()
+						if(!('name' in fieldType)) {
+							throw new Error('Cannot build range condition on a non-named type')
+						}
 
-			return new GraphQLInputObjectType({
-				name: inflection.upperCamelCase(
-					`${fieldType.name}_range_condition`
-				),
-				description: 'Conditions for filtering by range',
-				fields: {
-					from: { type: fieldType },
-					to: { type: fieldType }
-				}
-			})
+						return {
+							from: { type: fieldType },
+							to: { type: fieldType }
+						}
+					}
+				}),
+			}
+		},
+		getType(fieldCodec, _, { inflection, getInputTypeByName }) {
+			return getInputTypeByName(inflection.rangeConditionTypeName(fieldCodec))
 		},
 		buildApplys: {
 			default(attrName, attr) {
@@ -195,7 +160,8 @@ export const FILTER_TYPES_MAP: { [K in FilterType]: FilterTypeImpl } = {
 		}
 	},
 	'icontains': {
-		buildType: fieldType => {
+		getType(fieldCodec, getGraphQlType) {
+			let fieldType = getGraphQlType()
 			fieldType = fieldType instanceof GraphQLNonNull
 				? fieldType.ofType
 				: fieldType
