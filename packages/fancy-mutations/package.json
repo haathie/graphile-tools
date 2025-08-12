@@ -19,7 +19,7 @@
 		"prepack": "npm run build"
 	},
 	"dependencies": {
-		"@haathie/postgraphile-common-utils": "^0.1.0",
+		"@haathie/postgraphile-common-utils": "^0.1.2",
 		"debug": "^4.4.1"
 	},
 	"peerDependencies": {
