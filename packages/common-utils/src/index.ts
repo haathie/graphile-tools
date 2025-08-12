@@ -114,3 +114,36 @@ export function buildFieldNameToAttrNameMap(
 
 	return map
 }
+
+/**
+ * Maps an object (or list of objects) coming from the GraphQL API
+ * to the internal PG attribute names.
+ * @example `{ fullName: 'John Doe', age: 30 }` => `{ full_name: 'John', age: 30 }`
+ */
+export function mapFieldsToAttrs(
+	value: unknown,
+	map: FieldNameToAttrNameMap
+): unknown {
+	if(Array.isArray(value)) {
+		return value.map(v => mapFieldsToAttrs(v, map))
+	}
+
+	if(typeof value !== 'object' || value === null) {
+		return value
+	}
+
+	const attrs: Record<string, unknown> = {}
+	for(const [key, _value] of Object.entries(value)) {
+		const attrName = map[key]
+		if(typeof attrName === 'string') {
+			// simple attribute, just map it
+			attrs[attrName] = _value
+			continue
+		}
+
+		const [attrNameKey, subMap] = attrName
+		attrs[attrNameKey] = mapFieldsToAttrs(_value, subMap)
+	}
+
+	return attrs
+}

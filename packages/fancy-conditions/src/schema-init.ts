@@ -1,7 +1,8 @@
-import { isSubscriptionPlan } from '@haathie/postgraphile-common-utils'
+import { buildFieldNameToAttrNameMap, isSubscriptionPlan, mapFieldsToAttrs } from '@haathie/postgraphile-common-utils'
 import type { PgCodecAttribute, PgCodecWithAttributes, PgCondition, PgResource } from 'postgraphile/@dataplan/pg'
 import type { InputObjectFieldApplyResolver } from 'postgraphile/grafast'
 import type { GraphQLInputFieldConfig } from 'postgraphile/graphql'
+import type { SQL, SQLRawValue } from 'postgraphile/pg-sql2'
 import { FILTER_METHODS_CONFIG, FILTER_TYPES_MAP } from './filter-implementations/index.ts'
 import type { FilterMethod, FilterType } from './types.ts'
 import { getBuildGraphQlTypeByCodec, getFilterMethodsForAttribute, getFilterTypesForAttribute } from './utils.ts'
@@ -25,7 +26,8 @@ export const init: Hook = (_, build) => {
 	const {
 		input: { pgRegistry: { pgResources } },
 		inflection,
-		registerInputObjectType
+		registerInputObjectType,
+		sql,
 	} = build
 	const registeredTypes = new Set<string>()
 
@@ -69,10 +71,7 @@ export const init: Hook = (_, build) => {
 
 				registerInputObjectType(
 					name,
-					{
-						conditionFilterType: filterType,
-						pgCodec: attr.codec,
-					},
+					{ conditionFilterType: filterType, pgCodec: attr.codec },
 					spec,
 					`${attr.codec.name}_${filterType}_condition`
 				)
@@ -128,6 +127,7 @@ export const init: Hook = (_, build) => {
 		const { getType, applys } = FILTER_TYPES_MAP[filter]!
 		const builtType
 			= getType(attr.codec, getBuildGraphQlTypeByCodec(attr.codec, build), build)
+		const fieldMap = buildFieldNameToAttrNameMap(attr.codec, inflection)
 
 		const applyMethod = applys?.[method]!
 		if(!applyMethod) {
@@ -157,6 +157,7 @@ export const init: Hook = (_, build) => {
 						attrName: attrName,
 						attr: attr,
 						config,
+						serialiseToSql: () => serialiseToSql(args),
 					}
 				}
 				const isSubscription = isSubscriptionPlan(plan)
@@ -175,6 +176,26 @@ export const init: Hook = (_, build) => {
 
 				return applyMethod(plan, args, newInfo)
 			}
+		}
+
+		function serialiseToSql(input: unknown): SQL | null {
+			if(input === null || input === undefined) {
+				return sql.null
+			}
+
+			// so if the input isn't a compound type, we can just return it
+			// we'll assume it's a scalar value or an array of scalars
+			if(!fieldMap) {
+				return sql.value(input as SQLRawValue)
+			}
+
+			const mapped = mapFieldsToAttrs(input, fieldMap)
+			const mainCodec = attr.codec.arrayOfCodec || attr.codec
+			if(Array.isArray(mapped)) {
+				return sql.value(mapped.map(v => mainCodec.toPg(v)))
+			}
+
+			return sql.value(mainCodec.toPg(mapped))
 		}
 	}
 }

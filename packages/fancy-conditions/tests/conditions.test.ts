@@ -213,6 +213,12 @@ FILTER_METHOD_TESTS.forEach(({ method, additionalSql }, i) => describe(`${method
 		it('should query varchar[]', async() => {
 			await selectAuthorOneByCondition({ nicknames: { eq: 'A1' } })
 		})
+
+		method === 'plainSql' && it('should query bio', async() => {
+			await selectAuthorOneByCondition({
+				bio: { eq: { age: 30, 'favouriteGenre': 'Science Fiction' } }
+			})
+		})
 	})
 
 	describe('Eq In', () => {
@@ -225,6 +231,12 @@ FILTER_METHOD_TESTS.forEach(({ method, additionalSql }, i) => describe(`${method
 		it('should query varchar[]', async() => {
 			await selectAuthorOneByCondition({
 				nicknames: { eqIn: ['Author ABCD', 'a_one'] }
+			})
+		})
+
+		method === 'plainSql' && it('should query bio', async() => {
+			await selectAuthorOneByCondition({
+				bio: { eqIn: [{ age: 30, 'favouriteGenre': 'Science Fiction' }] }
 			})
 		})
 	})

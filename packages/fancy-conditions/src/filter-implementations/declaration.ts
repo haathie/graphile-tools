@@ -1,4 +1,3 @@
-import { GraphQLList, GraphQLNonNull, GraphQLScalarType } from 'postgraphile/graphql'
 import type { FilterApply, FilterImplementation, FilterMethod, FilterMethodConfig, FilterType } from '../types.ts'
 
 /**
@@ -56,7 +55,7 @@ registerFilterImplementations({
 		},
 	},
 	'eqIn': {
-		getType(codec, getGraphQlType) {
+		getType(codec, getGraphQlType, { graphql: { GraphQLList } }) {
 			return new GraphQLList(getGraphQlType())
 		},
 	},
@@ -85,7 +84,7 @@ registerFilterImplementations({
 		},
 	},
 	'icontains': {
-		getType(fieldCodec, getGraphQlType) {
+		getType(fieldCodec, getGraphQlType, { graphql: { GraphQLNonNull, GraphQLScalarType } }) {
 			let fieldType = getGraphQlType()
 			fieldType = fieldType instanceof GraphQLNonNull
 				? fieldType.ofType

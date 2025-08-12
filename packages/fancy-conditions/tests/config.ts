@@ -39,6 +39,10 @@ export const CONFIG: TestGraphileConfig = {
 		CREATE INDEX ON "conditions_test"."books"(author_id);
 		CREATE INDEX ON "conditions_test"."books"(publisher_id);
 
+		comment on column "conditions_test"."authors".bio is $$
+		@behaviour filterType:eq filterType:eqIn
+		$$;
+
 		comment on column "conditions_test"."books".id is $$
 		@behaviour filterType:range
 		$$;

@@ -13,7 +13,7 @@ registerFilterMethod(
 	'plainSql',
 	{ supportedOnSubscription: true },
 	{
-		eq: (cond, input, { scope: { attrName, attr } }) => {
+		eq: (cond, input, { scope: { attrName, attr, serialiseToSql } }) => {
 			const id = sql`${cond.alias}.${sql.identifier(attrName)}`
 			const codec = attr.codec.arrayOfCodec || attr.codec
 			if(input === null) {
@@ -22,24 +22,22 @@ registerFilterMethod(
 
 			if(attr.codec.arrayOfCodec) {
 				// If the attribute is an array, we need to check for equality
-				return cond.where(
-					sql`${sql.value(input)}::${codec.sqlType} = ANY(${id})`
-				)
+				return cond
+					.where(sql`${serialiseToSql()}::${codec.sqlType} = ANY(${id})`)
 			}
 
-			return cond
-				.where(sql`${id} = ${sql.value(input)}::${codec.sqlType}`)
+			return cond.where(sql`${id} = ${serialiseToSql()}::${codec.sqlType}`)
 		},
-		eqIn: (cond, input, { scope: { attrName, attr } }) => {
+		eqIn: (cond, input, { scope: { attrName, attr, serialiseToSql } }) => {
 			const id = sql`${cond.alias}.${sql.identifier(attrName)}`
 			const codec = attr.codec.arrayOfCodec || attr.codec
 			const whereClause = attr.codec.arrayOfCodec
-				? sql`${id} && ${sql.value(input)}::${codec.sqlType}[] -- TRUE`
+				? sql`${id} && ${serialiseToSql()}::${codec.sqlType}[] -- TRUE`
 				: sql`${id} IN (
-					SELECT * FROM unnest(${sql.value(input)}::${codec.sqlType}[])
+					SELECT arr FROM unnest(${serialiseToSql()}::${codec.sqlType}[]) arr
 				)`
 
-			const hasNull = input.includes(null)
+			const hasNull = Array.isArray(input) && input.includes(null)
 			if(!hasNull) {
 				return cond.where(whereClause)
 			}

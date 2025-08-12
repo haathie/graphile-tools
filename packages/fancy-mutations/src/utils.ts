@@ -1,4 +1,4 @@
-import { buildFieldNameToAttrNameMap, type FieldNameToAttrNameMap, getRelationFieldName } from '@haathie/postgraphile-common-utils'
+import { buildFieldNameToAttrNameMap, getRelationFieldName, mapFieldsToAttrs } from '@haathie/postgraphile-common-utils'
 import * as debug from 'debug'
 import type { PgCodecAttribute, PgResource } from 'postgraphile/@dataplan/pg'
 import type { InputObjectFieldApplyResolver } from 'postgraphile/grafast'
@@ -331,32 +331,4 @@ function buildApplyPlanForCodec(
 	}
 
 	return plan
-}
-
-function mapFieldsToAttrs(
-	value: unknown,
-	map: FieldNameToAttrNameMap
-): unknown {
-	if(Array.isArray(value)) {
-		return value.map(v => mapFieldsToAttrs(v, map))
-	}
-
-	if(typeof value !== 'object' || value === null) {
-		return value
-	}
-
-	const attrs: Record<string, unknown> = {}
-	for(const [key, _value] of Object.entries(value)) {
-		const attrName = map[key]
-		if(typeof attrName === 'string') {
-			// simple attribute, just map it
-			attrs[attrName] = _value
-			continue
-		}
-
-		const [attrNameKey, subMap] = attrName
-		attrs[attrNameKey] = mapFieldsToAttrs(_value, subMap)
-	}
-
-	return attrs
 }

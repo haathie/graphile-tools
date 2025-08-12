@@ -2,16 +2,22 @@ import type {} from 'postgraphile'
 import type { PgCodec, PgCodecAttribute, PgCondition, PgResource } from 'postgraphile/@dataplan/pg'
 import type { InputObjectFieldApplyResolver } from 'postgraphile/grafast'
 import type { GraphQLInputType } from 'postgraphile/graphql'
+import type { SQL } from 'postgraphile/pg-sql2'
 
 export type FilterType = keyof GraphileBuild.FilterTypeMap
 
 export type FilterMethod = keyof GraphileBuild.FilterMethodMap
 
-export type FilterApply<T = unknown> = InputObjectFieldApplyResolver<PgCondition, any, {
-	attrName: string
-	attr: PgCodecAttribute
-	config?: T
-}>
+export type FilterApply<T = unknown> = InputObjectFieldApplyResolver<
+	PgCondition,
+	any,
+	{
+		attrName: string
+		attr: PgCodecAttribute
+		serialiseToSql: () => SQL
+		config?: T
+	}
+>
 
 export type FilterImplementation = {
 	description?: string
