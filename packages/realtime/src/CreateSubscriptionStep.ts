@@ -1,8 +1,9 @@
 import { type PgCodecWithAttributes, type PgResource } from 'postgraphile/@dataplan/pg'
 import { type ExecutionDetails, type ExecutionResults, Step } from 'postgraphile/grafast'
 import { type SQL, sql } from 'postgraphile/pg-sql2'
-import { type PgChangeOp, SubscriptionManager } from './manager.ts'
-import { PgWhereBuilder } from './PgWhereBuilder.ts'
+import type { SubscriptionManager } from './manager.ts'
+import { type PgChangeOp } from './manager.ts'
+import type { PgWhereBuilder } from './PgWhereBuilder.ts'
 import { DEBUG } from './utils.ts'
 
 export class CreateSubscriptionStep extends Step<any> {

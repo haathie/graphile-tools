@@ -1,6 +1,6 @@
 import { getInputConditionForResource } from '@haathie/postgraphile-common-utils'
 import { type PgSelectStep } from 'postgraphile/@dataplan/pg'
-import { GraphQLEnumType, GraphQLInputObjectType } from 'postgraphile/graphql'
+import type { GraphQLEnumType, GraphQLInputObjectType } from 'postgraphile/graphql'
 import { PgCreateStep } from './PgCreateStep.ts'
 import { PgSelectAndModify } from './PgSelectAndModify.js'
 import type { GrafastPlanParams, PgTableResource } from './types.ts'

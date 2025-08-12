@@ -2,7 +2,8 @@ import { type BootedGraphileServer, bootPreset, getSuperuserPool, makeRandomPort
 import assert from 'node:assert'
 import { writeFile } from 'node:fs/promises'
 import { after, before, describe, it } from 'node:test'
-import { GraphQLInputObjectType, printSchema } from 'postgraphile/graphql'
+import type { GraphQLInputObjectType } from 'postgraphile/graphql'
+import { printSchema } from 'postgraphile/graphql'
 import type { FilterMethod } from '../src/types.ts'
 import { CONFIG } from './config.ts'
 

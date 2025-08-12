@@ -1,5 +1,5 @@
 import { PgCondition, type PgConditionCapableParent, type PgWhereConditionSpec } from 'postgraphile/@dataplan/pg'
-import { ApplyInputStep, ConstantStep, type ExecutionDetails, type ExecutionResults, Step } from 'postgraphile/grafast'
+import { type ApplyInputStep, ConstantStep, type ExecutionDetails, type ExecutionResults, Step } from 'postgraphile/grafast'
 import { isSQL, type SQL } from 'postgraphile/pg-sql2'
 
 export class PgWhereBuilder extends Step<SQL | undefined>

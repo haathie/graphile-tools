@@ -1,7 +1,7 @@
 import { type BootedGraphileServer, bootPreset, getSuperuserPool, runDdlAndBoot } from '@haathie/postgraphile-common-utils/tests'
 import assert from 'assert'
 import { after, before, describe, it } from 'node:test'
-import { GraphQLError } from 'postgraphile/graphql'
+import type { GraphQLError } from 'postgraphile/graphql'
 import { DEFAULT_RECORDS_PER_PAGE } from '../src/index.ts'
 import { CONFIG } from './config.ts'
 

@@ -2,7 +2,8 @@ import { readFile } from 'fs/promises'
 import { createServer } from 'http'
 import { postgraphile, type PostGraphileInstance } from 'postgraphile'
 import { grafserv } from 'postgraphile/grafserv/node'
-import { type ExecutionResult, GraphQLError, GraphQLSchema } from 'postgraphile/graphql'
+import type { GraphQLSchema } from 'postgraphile/graphql'
+import { type ExecutionResult, GraphQLError } from 'postgraphile/graphql'
 
 export type TestGraphileConfig = {
 	ddl: string

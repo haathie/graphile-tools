@@ -1,7 +1,7 @@
 export type * from './types.ts'
 import { getRequestIp } from '@haathie/postgraphile-common-utils'
 import { LRUCache } from 'lru-cache'
-import { Pool } from 'pg'
+import type { Pool } from 'pg'
 import type {} from 'postgraphile'
 import type {} from 'postgraphile/adaptors/pg'
 import { get, Step } from 'postgraphile/grafast'

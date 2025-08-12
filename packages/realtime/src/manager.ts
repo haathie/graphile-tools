@@ -1,6 +1,6 @@
 import { readFile } from 'fs/promises'
 import { join } from 'path'
-import { Pool } from 'pg'
+import type { Pool } from 'pg'
 import { PassThrough, type Writable } from 'stream'
 import { setTimeout } from 'timers/promises'
 import { DEBUG } from './utils.ts'

@@ -1,5 +1,5 @@
 import * as debug from 'debug'
-import { Pool } from 'pg'
+import type { Pool } from 'pg'
 import type {} from 'postgraphile'
 import type { PgCodec, PgCodecAttribute } from 'postgraphile/@dataplan/pg'
 import type {} from 'postgraphile/adaptors/pg'

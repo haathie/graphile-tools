@@ -1,8 +1,10 @@
 import type {} from 'postgraphile'
-import { PgCodec, type PgCodecWithAttributes, PgResource } from 'postgraphile/@dataplan/pg'
+import type { PgCodec, PgResource } from 'postgraphile/@dataplan/pg'
+import { type PgCodecWithAttributes } from 'postgraphile/@dataplan/pg'
 import { Modifier, Step } from 'postgraphile/grafast'
 import type {} from 'postgraphile/grafserv/express/v4'
-import { GraphQLInputObjectType, GraphQLObjectType, OperationTypeNode } from 'postgraphile/graphql'
+import type { GraphQLInputObjectType } from 'postgraphile/graphql'
+import { GraphQLObjectType, OperationTypeNode } from 'postgraphile/graphql'
 
 export type PgTableResource = PgResource<string, PgCodecWithAttributes>
 
