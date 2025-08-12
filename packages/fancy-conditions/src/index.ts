@@ -18,6 +18,10 @@ export const FancyConditionsPlugin: GraphileConfig.Plugin = {
 	schema: {
 		behaviorRegistry: {
 			add: {
+				'filterable': {
+					description: 'Allow filtering using by fields on this relation',
+					entities: ['pgCodecRef', 'pgRefDefinition']
+				},
 				...Object.entries(FILTER_TYPES_MAP).reduce(
 					(acc, [filterType, { description }]) => {
 						const behaviourName = `filterType:${filterType as FilterType}` as const

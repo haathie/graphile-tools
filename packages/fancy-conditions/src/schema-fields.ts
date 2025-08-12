@@ -1,7 +1,7 @@
 import { getInputConditionForResource } from '@haathie/postgraphile-common-utils'
-import { type PgCodecWithAttributes, PgCondition } from 'postgraphile/@dataplan/pg'
-import { type InputObjectFieldApplyResolver } from 'postgraphile/grafast'
-import { type GraphQLInputFieldConfig, GraphQLInputObjectType } from 'postgraphile/graphql'
+import type { PgCodecWithAttributes, PgCondition } from 'postgraphile/@dataplan/pg'
+import type { InputObjectFieldApplyResolver } from 'postgraphile/grafast'
+import type { GraphQLInputFieldConfig, GraphQLInputObjectType } from 'postgraphile/graphql'
 import { type SQL, sql } from 'postgraphile/pg-sql2'
 import { getFilterTypesForAttribute } from './utils.ts'
 
@@ -100,10 +100,8 @@ export const fields: Hook = (fieldMap, build, ctx) => {
 			extensions: {
 				grafast: {
 					apply(target: PgCondition) {
-						const wherePlan = target.existsPlan({
-							alias: 't',
-							tableExpression: rmtRrscFrom,
-						})
+						const wherePlan = target
+							.existsPlan({ alias: 't', tableExpression: rmtRrscFrom })
 
 						const localAttrsJoined = sql.join(
 							(relation.localAttributes as string[]).map(attr => (

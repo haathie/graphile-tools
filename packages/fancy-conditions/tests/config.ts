@@ -18,7 +18,7 @@ export const CONFIG: TestGraphileConfig = {
 			name TEXT NOT NULL,
 			bio "fancy_conditions_test"."bio_data",
 			metadata JSONB,
-			nickname TEXT,
+			nicknames TEXT[],
 			UNIQUE(name)
     );
 
@@ -43,6 +43,10 @@ export const CONFIG: TestGraphileConfig = {
 		@behaviour filterType:icontains filterType:eq
 		$$;
 
+		comment on column "fancy_conditions_test"."authors".nicknames is $$
+		@behaviour filterType:icontains filterType:eq filterType:eqIn
+		$$;
+
 		comment on column "fancy_conditions_test"."authors".id is $$
 		@behaviour filterType:eq filterType:eqIn filterType:range
 		$$;
@@ -50,9 +54,17 @@ export const CONFIG: TestGraphileConfig = {
 		comment on column "fancy_conditions_test"."books".id is $$
 		@behaviour filterType:range
 		$$;
+
+		comment on column "fancy_conditions_test"."books".title is $$
+		@behaviour filterType:icontains
+		$$;
+
+		comment on table "fancy_conditions_test"."authors" is $$
+		@ref books via:(id)->books(author_id) behavior:filterable
+		$$;
 		
 		comment on constraint books_author_id_fkey on fancy_conditions_test.books is $$
-		@behaviour +single filterable
+		@behaviour +single
 		$$;
 		comment on constraint books_publisher_id_fkey on fancy_conditions_test.books is $$
 		@behaviour +single
