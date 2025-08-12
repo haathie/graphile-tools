@@ -7,17 +7,7 @@ services:
       POSTGRES_DATABASE: postgres
     ports:
       - '5432:5432'
-    command: -c config_file=/etc/postgresql.conf
-    volumes:
-      - ./dev/pg.conf:/etc/postgresql.conf
-    deploy:
-      resources:
-        limits:
-          cpus: '2'
-          memory: 4096m
-        reservations:
-          cpus: '0.1'
-          memory: 256m
+    command: -c shared_preload_libraries='pg_search'
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 10s
