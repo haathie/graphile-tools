@@ -1,9 +1,7 @@
 import { type BootedGraphileServer, bootPreset, getSuperuserPool, makeRandomPort, runDdl } from '@haathie/postgraphile-common-utils/tests'
 import assert from 'node:assert'
-import { writeFile } from 'node:fs/promises'
 import { after, before, describe, it } from 'node:test'
 import type { GraphQLInputObjectType } from 'postgraphile/graphql'
-import { printSchema } from 'postgraphile/graphql'
 import type { FilterMethod } from '../src/types.ts'
 import { CONFIG } from './config.ts'
 
@@ -157,8 +155,6 @@ FILTER_METHOD_TESTS.forEach(({ method, additionalSql }, i) => describe(`${method
 
 	it('should correctly generate schemas', async() => {
 		const schema = srv.schema
-
-		await writeFile('./schema.graphql', printSchema(schema))
 
 		const authorCondition = schema
 		 .getType('AuthorCondition') as GraphQLInputObjectType
