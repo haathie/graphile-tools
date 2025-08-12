@@ -4,7 +4,7 @@
 	"scripts": {},
 	"dependencies": {
 		"@graphile/simplify-inflection": "^8.0.0-beta.7",
-		"@haathie/fancy-conditions": "*",
+		"@haathie/postgraphile-targeted-conditions": "*",
 		"@haathie/postgraphile-realtime": "*",
 		"@haathie/postgraphile-fancy-mutations": "*",
 		"@haathie/postgraphile-rate-limits": "*",

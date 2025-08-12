@@ -1,6 +1,6 @@
-# Postgraphile Fancy Conditions Plugin
+# Postgraphile Targeted Conditions
 
-Opt-in & configurable conditions plugin for Postgraphile. This plugin is designed to allow you to quickly add conditions to your Postgraphile queries without having to write custom SQL or GraphQL plans. It also supports adding conditions on fields in related tables.
+Opt-in & configurable conditions plugin for Postgraphile. This plugin is designed to allow you to quickly enable conditions on fields for your Postgraphile queries without having to write custom SQL or GraphQL plans. It also supports adding conditions on fields in related tables.
 
 Please read through [the Caveats section](#caveats) before using this plugin.
 
@@ -8,18 +8,18 @@ Please read through [the Caveats section](#caveats) before using this plugin.
 
 Install:
 ``` bash
-npm i @haathie/fancy-conditions
+npm i @haathie/postgraphile-targeted-conditions
 ```
 
 Add the plugin to your Postgraphile configuration:
 ``` ts
-import { FancyConditionsPlugin } from '@haathie/fancy-conditions'
+import { TargetedConditionsPlugin } from '@haathie/postgraphile-targeted-conditions'
 
 export const config: GraphileBuild.Preset = {
 	...otherOptions,
 	plugins: [
 		...otherPlugins,
-		FancyConditionsPlugin,
+		TargetedConditionsPlugin,
 	],
 }
 ```
@@ -116,7 +116,7 @@ Presently, the plugin supports the following filter methods:
 Let's implement a `startsWith` filter type that allows filtering strings that start with a given value.
 
 ``` ts
-import { registerFilterImplementations } from '@haathie/fancy-conditions'
+import { registerFilterImplementations } from '@haathie/postgraphile-targeted-conditions'
 
 // extend the "FilterTypeMap" interface to add the new filter type
 declare global {
@@ -173,7 +173,7 @@ See how other filter types are implemented [here](src/filter-implementations/dec
 To add a custom filter method, you can use the `registerFilterMethod` function. This allows you to define how the filter type should be applied in SQL.
 
 ``` ts
-import { registerFilterMethod } from '@haathie/fancy-conditions'
+import { registerFilterMethod } from '@haathie/postgraphile-targeted-conditions'
 
 // extend the "FilterMethodMap" interface to add the new filter method
 declare global {

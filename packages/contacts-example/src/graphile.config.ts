@@ -1,9 +1,9 @@
 import { PgSimplifyInflectionPreset } from '@graphile/simplify-inflection'
-import { FancyConditionsPlugin } from '@haathie/fancy-conditions'
 import { FancyMutationsPlugin } from '@haathie/postgraphile-fancy-mutations'
 import { RateLimitsPlugin } from '@haathie/postgraphile-rate-limits'
 import { PgRealtimePlugin } from '@haathie/postgraphile-realtime'
 import { ReasonableLimitsPlugin } from '@haathie/postgraphile-reasonable-limits'
+import { TargetedConditionsPlugin } from '@haathie/postgraphile-targeted-conditions'
 import { makePgService } from 'postgraphile/adaptors/pg'
 // The standard base preset to use, includes the main PostGraphile features
 import { PostGraphileAmberPreset } from 'postgraphile/presets/amber'
@@ -17,7 +17,7 @@ const preset: GraphileConfig.Preset = {
 		PgRealtimePlugin,
 		ReasonableLimitsPlugin,
 		FancyMutationsPlugin,
-		FancyConditionsPlugin,
+		TargetedConditionsPlugin,
 		RateLimitsPlugin,
 	],
 	disablePlugins: [

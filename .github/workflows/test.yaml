@@ -42,7 +42,7 @@ jobs:
         key: ${{ steps.cache-node-modules.outputs.cache-primary-key }}
 
     - name: Build
-      run: npm run build --workspaces --if-present
+      run: npm run build:all
 
     - name: Lint
       run: npm run lint

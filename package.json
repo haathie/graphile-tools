@@ -10,7 +10,7 @@
     "packages/*"
   ],
   "scripts": {
-    "prepack": "npm run build",
+    "build:all": "npm run build --workspaces --if-present",
     "lint": "eslint packages/* --ext .js,.ts,.jsx,.tsx",
     "lint:fix": "npm run lint -- --fix",
     "run-file": "sh scripts/run-with-env.sh",

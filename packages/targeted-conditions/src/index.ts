@@ -12,8 +12,8 @@ type BehaviourMap = Partial<Record<keyof GraphileBuild.BehaviorStrings, {
 	entities: ReadonlyArray<keyof GraphileBuild.BehaviorEntities>
 }>>
 
-export const FancyConditionsPlugin: GraphileConfig.Plugin = {
-	name: 'FancyConditionsPlugin',
+export const TargetedConditionsPlugin: GraphileConfig.Plugin = {
+	name: 'TargetedConditionsPlugin',
 	version: '0.0.1',
 	inflection,
 	schema: {
@@ -52,7 +52,7 @@ export const FancyConditionsPlugin: GraphileConfig.Plugin = {
 		hooks: {
 			build(build) {
 				return build
-					.extend(build, { inputConditionTypes: {} }, 'FancyConditionsPlugin')
+					.extend(build, { inputConditionTypes: {} }, 'TargetedConditionsPlugin')
 			},
 			init: init,
 			'GraphQLInputObjectType_fields': fields,

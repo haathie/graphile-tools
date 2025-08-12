@@ -64,7 +64,7 @@ Postgraphile & Postgres Tooling Speed Up Going to Production. The repository con
 	}
 	```
 
-- [Fancy Conditions](/packages/fancy-conditions/): Postgraphile plugin for advanced filtering, including relational conditions, ParadeDB support, and more. Example:
+- [Targeted Conditions](/packages/targeted-conditions/): Postgraphile plugin for advanced filtering, including relational conditions, ParadeDB support, and more. Example:
 	``` graphql
 	query GetContacts {
 		allContacts(condition: {

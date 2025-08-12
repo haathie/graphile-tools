@@ -1,7 +1,7 @@
 import type { TestGraphileConfig } from '@haathie/postgraphile-common-utils/tests'
 import { makePgService } from 'postgraphile/adaptors/pg'
 import { PostGraphileAmberPreset } from 'postgraphile/presets/amber'
-import { FancyConditionsPlugin } from '../src/index.ts'
+import { TargetedConditionsPlugin } from '../src/index.ts'
 
 export const CONFIG: TestGraphileConfig = {
 	ddl: `
@@ -63,7 +63,7 @@ export const CONFIG: TestGraphileConfig = {
 		$$;`,
 	preset: {
 		extends: [PostGraphileAmberPreset],
-		plugins: [FancyConditionsPlugin],
+		plugins: [TargetedConditionsPlugin],
 		pgServices: [
 			makePgService({
 				// Database connection string, read from an environmental variable:

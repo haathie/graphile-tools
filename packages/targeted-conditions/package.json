@@ -1,5 +1,5 @@
 {
-	"name": "@haathie/fancy-conditions",
+	"name": "@haathie/postgraphile-targeted-conditions",
 	"version": "0.1.0",
 	"type": "module",
 	"files": ["lib"],
