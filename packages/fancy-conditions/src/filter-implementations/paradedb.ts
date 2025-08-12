@@ -42,9 +42,11 @@ registerFilterMethod<{ fieldName: string }>(
 				OR NOT ${id} @@@ paradedb.exists(${sql.literal(attrName)})
 			)`)
 		},
-		'range': (cond, { from, to }, { scope: { attr, attrName } }) => {
+		'range': (cond, { from, to }, { scope: { attr, attrName, config } }) => {
 			const id = sql`${cond.alias}.${sql.identifier(attrName)}`
 			const { sqlType } = attr.codec.arrayOfCodec || attr.codec
+			const fieldName = config?.fieldName || attrName
+
 			const fromSql = from
 				? sql`jsonb_build_object('included', ${sql.value(from)}::${sqlType})`
 				: sql.null
@@ -55,7 +57,7 @@ registerFilterMethod<{ fieldName: string }>(
 				jsonb_build_object(
 					'range',
 					jsonb_build_object(
-						'field', ${sql.literal(attrName)}, 
+						'field', ${sql.literal(fieldName)}, 
 						'lower_bound', ${fromSql},
 						'upper_bound', ${toSql}
 					)
