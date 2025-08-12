@@ -1,4 +1,4 @@
-import { getSuperuserPool, runDdl } from '@haathie/postgraphile-common-utils/tests'
+import { getSuperuserPool } from '@haathie/postgraphile-common-utils/tests'
 import assert from 'node:assert'
 import { after, before, describe, it } from 'node:test'
 import type { Pool, PoolClient } from 'pg'
@@ -16,13 +16,15 @@ type Author = {
 	nickname: string | Date | null
 }
 
+const SCHEMA_NAME = 'mutations_pg_utils'
+
 const AUTHOR_CTX: PGEntityCtx<Partial<Author>> = {
 	'idProperties': ['id'],
 	'propertyColumnMap': {
 		'id': { sqlType: 'varchar' },
 		'name': { sqlType: 'varchar' },
 		'bio': {
-			sqlType: 'mutations_test.bio_data',
+			sqlType: 'mutations_pg_utils.bio_data',
 			convertToPg({ age, favourite_genre: g }) {
 				return `(${age},${g})`
 			}
@@ -31,7 +33,7 @@ const AUTHOR_CTX: PGEntityCtx<Partial<Author>> = {
 		'nickname': { sqlType: 'varchar' }
 	},
 	'uniques': [{ columns: ['id'] }, { columns: ['name'] }],
-	'tableName': 'mutations_test.authors',
+	'tableName': 'mutations_pg_utils.authors',
 }
 
 describe('PG Utils', () => {
@@ -39,8 +41,12 @@ describe('PG Utils', () => {
 	let pool: Pool
 
 	before(async() => {
-		await runDdl(CONFIG)
+		// using the same schema as the config causes the tests to fail
+		// if the primary graphql tests are run concurrently
+		const ddl = CONFIG.ddl.replaceAll('mutations_test', SCHEMA_NAME)
 		pool = getSuperuserPool(CONFIG.preset)
+
+		await pool.query(`BEGIN;${ddl}COMMIT;`)
 	})
 
 	after(async() => {
