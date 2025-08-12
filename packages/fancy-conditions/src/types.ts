@@ -17,6 +17,11 @@ export type FilterImplementation = {
 	description?: string
 	/**
 	 * Register the type used to filter the attribute.
+	 * @param fieldCodec The codec of the field being filtered.
+	 * @param getGraphQlType A function that returns the GraphQL type of the
+	 *  field. Only use in `registerInputObjectType` method or you'll get an
+	 *  error from Graphile
+	 * @param build The build object.
 	 */
 	getRegisterTypeInfo?(
 		fieldCodec: PgCodec,
@@ -35,7 +40,15 @@ export type FilterImplementation = {
 }
 
 export type FilterMethodConfig = {
+	/**
+	 * Optionally add a human-readable description for the filter method.
+	 * Used in the behaviour registry
+	 */
 	description?: string
+	/**
+	 * Should this filter method be used on subscriptions?
+	 * If false, the `plainSql` method will be used instead.
+	 */
 	supportedOnSubscription: boolean
 }
 
@@ -60,8 +73,7 @@ declare global {
 		 * Method used to apply filters -- useful for different index types like
 		 * GIN, paradedb, zombodb, etc.
 		 */
-		interface FilterMethodMap {
-		}
+		interface FilterMethodMap {}
 
 		interface FilterTypeMap {
 			eq: true
