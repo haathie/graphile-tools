@@ -1,0 +1,51 @@
+name: Test
+
+on:
+  pull_request: {}
+  push:
+    branches:
+      - main
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Start Services
+      run: docker compose -f dev.docker-compose.yaml up -d --wait
+
+    - name: Setup Node
+      uses: actions/setup-node@v4
+      with:
+        node-version: 24
+
+    - name: Cache node modules
+      uses: actions/cache/restore@v4
+      id: cache-node-modules
+      with:
+        path: node_modules
+        key: ${{ runner.os }}-node-${{ hashFiles('**/package-lock.json') }}
+          
+    - name: Install Dependencies
+      if: steps.cache-node-modules.outputs.cache-hit != 'true'
+      id: npm-ci
+      run: npm ci
+      
+    - name: Save Cache
+      # This step ensures the cache is saved even if subsequent steps fail
+      uses: actions/cache/save@v4
+      if: steps.npm-ci.outcome != 'skipped' && always()
+      with:
+        path: node_modules
+        key: ${{ steps.cache-node-modules.outputs.cache-primary-key }}
+
+    - name: Build
+      run: npm run build
+
+    - name: Lint
+      run: npm run lint
+
+    - name: Run tests
+      run: npm run test
