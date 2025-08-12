@@ -14,7 +14,10 @@ jobs:
     - uses: actions/checkout@v4
     
     - name: Start Services
-      run: docker compose -f dev.docker-compose.yaml up -d --wait
+      run: |
+        mkdir -p ./dev/pg_data
+        chmod -R a+rwx ./dev/pg_data
+        docker compose -f dev.docker-compose.yaml up
 
     - name: Setup Node
       uses: actions/setup-node@v4

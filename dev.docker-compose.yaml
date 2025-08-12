@@ -10,7 +10,7 @@ services:
     command: -c config_file=/etc/postgresql.conf
     volumes:
       - ./dev/pg.conf:/etc/postgresql.conf
-      - ./dev/pg_data:/var/lib/postgresql/data:z
+      - ./dev/pg_data:/var/lib/postgresql/data
     deploy:
       resources:
         limits:
