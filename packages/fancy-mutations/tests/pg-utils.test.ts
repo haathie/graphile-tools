@@ -22,7 +22,7 @@ const AUTHOR_CTX: PGEntityCtx<Partial<Author>> = {
 		'id': { sqlType: 'varchar' },
 		'name': { sqlType: 'varchar' },
 		'bio': {
-			sqlType: 'fancy_mutations_test.bio_data',
+			sqlType: 'mutations_test.bio_data',
 			convertToPg({ age, favourite_genre: g }) {
 				return `(${age},${g})`
 			}
@@ -31,7 +31,7 @@ const AUTHOR_CTX: PGEntityCtx<Partial<Author>> = {
 		'nickname': { sqlType: 'varchar' }
 	},
 	'uniques': [{ columns: ['id'] }, { columns: ['name'] }],
-	'tableName': 'fancy_mutations_test.authors',
+	'tableName': 'mutations_test.authors',
 }
 
 describe('PG Utils', () => {

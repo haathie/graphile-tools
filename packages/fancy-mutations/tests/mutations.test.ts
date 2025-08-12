@@ -48,7 +48,7 @@ const UPSERT_QL = `mutation CreateAuthors(
 	}
 }`
 
-describe('Fancy Mutations', () => {
+describe('Bulk & Nested Mutations', () => {
 
 	let srv: BootedGraphileServer
 
@@ -222,7 +222,7 @@ describe('Fancy Mutations', () => {
 
 		const pool = getSuperuserPool(CONFIG.preset)
 		const { rows: existingPubs } = await pool.query(
-			'SELECT * FROM fancy_mutations_test.publishers',
+			'SELECT * FROM mutations_test.publishers',
 		)
 
 		await assert.rejects(() => (
@@ -235,7 +235,7 @@ describe('Fancy Mutations', () => {
 		// ensure that if one of the rows fails,
 		// the entire mutation fails and no rows are created
 		const { rows: newPubs } = await pool.query(
-			'SELECT * FROM fancy_mutations_test.publishers'
+			'SELECT * FROM mutations_test.publishers'
 		)
 		assert.strictEqual(existingPubs.length, newPubs.length)
 	})
@@ -369,7 +369,7 @@ describe('Fancy Mutations', () => {
 		// ensure the other author is not affected
 		const pool = getSuperuserPool(CONFIG.preset)
 		const { rows: authors } = await pool.query(
-			'SELECT * FROM fancy_mutations_test.authors WHERE name = $1',
+			'SELECT * FROM mutations_test.authors WHERE name = $1',
 			['Author 6']
 		)
 		assert.partialDeepStrictEqual(
@@ -413,7 +413,7 @@ describe('Fancy Mutations', () => {
 		// ensure the other author is not affected
 		const pool = getSuperuserPool(CONFIG.preset)
 		const { rows: authors } = await pool.query(
-			'SELECT name FROM fancy_mutations_test.authors WHERE name IN ($1, $2)',
+			'SELECT name FROM mutations_test.authors WHERE name IN ($1, $2)',
 			['Author 7', 'Author 8']
 		)
 		assert.deepStrictEqual(authors, [{ name: 'Author 8' }])
