@@ -17,6 +17,8 @@ type FilterInfo = {
 	method: FilterMethod | undefined
 }
 
+type FilterTypeConfig = unknown
+
 const DEFAULT_FILTER_METHOD: FilterMethod = 'plainSql'
 
 export const init: Hook = (_, build) => {
@@ -89,6 +91,7 @@ export const init: Hook = (_, build) => {
 		{ types: filterTypes, method }: FilterInfo
 	) {
 		const attr = pgResource.codec.attributes![attrName]
+		const filterConfigs = getFilterConfigs(attr.extensions?.tags)
 
 		const typeName = inflection._resourceName(pgResource)
 		registerInputObjectType(
@@ -103,8 +106,9 @@ export const init: Hook = (_, build) => {
 				isOneOf: true,
 				fields() {
 					return filterTypes.reduce((fields, filterType) => {
-						const condType
-							= buildConditionField(attrName, attr, filterType, method)
+						const condType = buildConditionField(
+							attrName, attr, filterType, method, filterConfigs[filterType]
+						)
 						fields[filterType] = condType
 						return fields
 					}, { } as Record<string, GraphQLInputFieldConfig>)
@@ -119,6 +123,7 @@ export const init: Hook = (_, build) => {
 		attr: PgCodecAttribute,
 		filter: FilterType,
 		method: FilterMethod = DEFAULT_FILTER_METHOD,
+		config: FilterTypeConfig = { }
 	): GraphQLInputFieldConfig {
 		const { getType, applys } = FILTER_TYPES_MAP[filter]!
 		const builtType
@@ -151,6 +156,7 @@ export const init: Hook = (_, build) => {
 						...info.scope,
 						attrName: attrName,
 						attr: attr,
+						config,
 					}
 				}
 				const isSubscription = isSubscriptionPlan(plan)
@@ -171,4 +177,32 @@ export const init: Hook = (_, build) => {
 			}
 		}
 	}
+}
+
+function getFilterConfigs(
+	tags: Partial<GraphileBuild.PgCodecAttributeTags> | undefined
+) {
+	const filterConfigs: { [T in FilterType]?: FilterTypeConfig } = {}
+	const configTag = typeof tags?.filterConfig === 'string' ? [tags.filterConfig] : tags?.filterConfig
+	if(!configTag) {
+		return filterConfigs
+	}
+
+	for(const configStr of configTag) {
+		const colonIdx = configStr.indexOf(':')
+		if(colonIdx === -1) {
+			throw new Error(`Invalid filter config tag: ${configStr}`)
+		}
+
+		const filterType = configStr.slice(0, colonIdx) as FilterType
+		const configJsonStr = configStr.slice(colonIdx + 1)
+		try {
+			const configJson = JSON.parse(configJsonStr) as FilterTypeConfig
+			filterConfigs[filterType] = configJson
+		} catch(e: any) {
+			throw new Error(`Invalid JSON in filter config tag: ${configStr}, ${e.message}`)
+		}
+	}
+
+	return filterConfigs
 }

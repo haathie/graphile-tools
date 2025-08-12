@@ -19,7 +19,7 @@ describe('Rate Limits', () => {
 	})
 
 	after(async() => {
-		await srv?.close()
+		await srv?.destroy()
 	})
 
 	beforeEach(() => {
@@ -110,13 +110,13 @@ describe('Rate Limits', () => {
 				"COMMENT ON COLUMN rate_limits_test.books.metadata IS '@rateLimits field:authenticated:5/60s'"
 			)
 
-			await srv.close()
+			await srv.closeServer()
 
 			srv = await bootPreset(CONFIG.preset, srv.port)
 		})
 
 		after(async() => {
-			await srv.close()
+			await srv.closeServer()
 			// running DDL again will remove the metadata rate limit
 			srv = await runDdlAndBoot(CONFIG)
 		})

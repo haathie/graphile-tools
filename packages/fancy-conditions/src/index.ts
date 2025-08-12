@@ -1,4 +1,5 @@
 export * from './filter-implementations/declaration.ts'
+export * from './types.ts'
 
 import { FILTER_METHODS_CONFIG, FILTER_TYPES_MAP } from './filter-implementations/index.ts'
 import { inflection } from './inflection.ts'

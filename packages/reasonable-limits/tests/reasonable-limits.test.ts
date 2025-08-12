@@ -22,7 +22,7 @@ describe('Reasonable Limits', () => {
 	})
 
 	after(async() => {
-		await srv?.close()
+		await srv?.destroy()
 	})
 
 	it('should set a default limit', async() => {
@@ -60,12 +60,12 @@ describe('Reasonable Limits', () => {
 				$$;
 			`)
 
-			await srv.close()
+			await srv.closeServer()
 			srv = await bootPreset(CONFIG.preset, srv.port)
 		})
 
 		after(async() => {
-			await srv.close()
+			await srv.closeServer()
 			srv = await runDdlAndBoot(CONFIG)
 		})
 

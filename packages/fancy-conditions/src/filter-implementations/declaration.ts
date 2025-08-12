@@ -27,10 +27,10 @@ export function registerFilterImplementations(
 	}
 }
 
-export function registerFilterMethod(
+export function registerFilterMethod<T = unknown>(
 	method: FilterMethod,
 	config: FilterMethodConfig,
-	applys: { [K in FilterType]?: FilterApply }
+	applys: { [K in FilterType]?: FilterApply<T> }
 ) {
 	if(FILTER_METHODS_CONFIG[method]) {
 		throw new Error(`Filter method ${method} is already registered.`)
@@ -44,7 +44,7 @@ export function registerFilterMethod(
 		}
 
 		impl.applys ||= {}
-		impl.applys[method] = apply
+		impl.applys[method] = apply as FilterApply<unknown>
 	}
 }
 
@@ -65,7 +65,7 @@ registerFilterImplementations({
 			return {
 				name: inflection.rangeConditionTypeName(fieldCodec),
 				spec: () => ({
-					description: 'Filter values falling in a range',
+					description: 'Filter values falling in an inclusive range',
 					fields() {
 						const fieldType = getGraphQlType()
 						if(!('name' in fieldType)) {

@@ -83,7 +83,7 @@ describe('Subscriptions', () => {
 
 	after(async() => {
 		await client.dispose()
-		await srv.close()
+		await srv.destroy()
 	})
 
 	beforeEach(async() => {

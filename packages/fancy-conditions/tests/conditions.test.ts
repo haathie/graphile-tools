@@ -1,8 +1,9 @@
-import { type BootedGraphileServer, getSuperuserPool, runDdlAndBoot } from '@haathie/postgraphile-common-utils/tests'
+import { type BootedGraphileServer, bootPreset, getSuperuserPool, makeRandomPort, runDdl } from '@haathie/postgraphile-common-utils/tests'
 import assert from 'node:assert'
 import { writeFile } from 'node:fs/promises'
 import { after, before, describe, it } from 'node:test'
 import { GraphQLInputObjectType, printSchema } from 'postgraphile/graphql'
+import type { FilterMethod } from '../src/types.ts'
 import { CONFIG } from './config.ts'
 
 type Author = {
@@ -34,18 +35,95 @@ const AUTHORS_QUERY = `query GetAuthors($cond: AuthorCondition) {
 	}
 }`
 
-describe('Conditions', () => {
+type FilterMethodTest = {
+	method: FilterMethod
+	additionalSql?: string
+}
+
+const FILTER_METHOD_TESTS: FilterMethodTest[] = [
+	{
+		method: 'plainSql',
+	},
+	{
+		method: 'paradedb',
+		additionalSql: `
+		CREATE EXTENSION IF NOT EXISTS pg_search;
+		CREATE INDEX ON "conditions_test"."authors" USING bm25(id, name, nicknames)
+		WITH (
+			key_field='id',
+			text_fields='{
+				"name": {
+					"fast":true,
+					"tokenizer": {"type": "keyword"},
+					"record": "basic"
+				},
+				"nicknames": {
+					"fast":true,
+					"tokenizer": {"type": "keyword"},
+					"record": "basic"
+				},
+				"name_ngram": {
+					"fast":true,
+					"tokenizer": {
+						"type": "ngram",
+						"min_gram": 2,
+						"max_gram": 3,
+						"prefix_only": false
+					},
+					"record": "position",
+					"column": "name"
+				},
+				"nicknames_ngram": {
+					"fast":true,
+					"tokenizer": {
+						"type": "ngram",
+						"min_gram": 2,
+						"max_gram": 3,
+						"prefix_only": false
+					},
+					"record": "position",
+					"column": "nicknames"
+				}
+			}'
+		);`
+	}
+]
+
+// eslint-disable-next-line unicorn/no-array-for-each
+FILTER_METHOD_TESTS.forEach(({ method, additionalSql }, i) => describe(`${method} - Conditions`, () => {
 
 	let srv: BootedGraphileServer
 	let authors: Author[]
 
 	before(async() => {
-		srv = await runDdlAndBoot(CONFIG)
+		await runDdl(CONFIG)
+		const pool = getSuperuserPool(CONFIG.preset)
+
+		if(additionalSql) {
+			await pool.query(additionalSql)
+		}
+
+		await pool.query(`
+			comment on column "conditions_test"."authors".name is $$
+			@behaviour filterType:icontains filterType:eq filterMethod:${method}
+			@filterConfig icontains:{"fieldName":"name_ngram"}
+			$$;
+	
+			comment on column "conditions_test"."authors".nicknames is $$
+			@behaviour filterType:icontains filterType:eq filterType:eqIn filterMethod:${method}
+			@filterConfig icontains:{"fieldName":"nicknames_ngram"}
+			$$;
+	
+			comment on column "conditions_test"."authors".id is $$
+			@behaviour filterType:eq filterType:eqIn filterType:range filterMethod:${method}
+			$$;
+		`)
+
+		srv = await bootPreset(CONFIG.preset, makeRandomPort())
 
 		// seed the database with some data
-		const pool = getSuperuserPool(CONFIG.preset)
 		const { rows } = await pool.query(
-			`INSERT INTO "fancy_conditions_test"."authors"
+			`INSERT INTO "conditions_test"."authors"
 				(name, bio, metadata, nicknames)
 			VALUES
 				('Author One', ROW(30, 'Science Fiction'), '{"hobby": "reading"}', '{A1,a_one}'),
@@ -56,7 +134,7 @@ describe('Conditions', () => {
 		authors = rows as Author[]
 
 		await pool.query(
-			`INSERT INTO "fancy_conditions_test"."books" (title, author_id)
+			`INSERT INTO "conditions_test"."books" (title, author_id)
 			VALUES
 				('Book One', ${authors[0].id}),
 				('Book Two', ${authors[1].id}),
@@ -65,7 +143,15 @@ describe('Conditions', () => {
 	})
 
 	after(async() => {
-		await srv?.close()
+		// as tests need to only destroy the server, and not the PG pool
+		// we only close the server between test suites. However, after
+		// the last test suite, we destroy the pool too
+		if(i === FILTER_METHOD_TESTS.length - 1) {
+			await srv.destroy()
+			return
+		}
+
+		await srv?.closeServer()
 	})
 
 	it('should correctly generate schemas', async() => {
@@ -181,4 +267,4 @@ describe('Conditions', () => {
 		assert.equal(nodes.length, 1)
 		assert.partialDeepStrictEqual(nodes, [{ name: 'Author One' }])
 	}
-})
+}))

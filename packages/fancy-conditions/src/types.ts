@@ -7,9 +7,10 @@ export type FilterType = keyof GraphileBuild.FilterTypeMap
 
 export type FilterMethod = keyof GraphileBuild.FilterMethodMap
 
-export type FilterApply = InputObjectFieldApplyResolver<PgCondition, any, {
+export type FilterApply<T = unknown> = InputObjectFieldApplyResolver<PgCondition, any, {
 	attrName: string
 	attr: PgCodecAttribute
+	config?: T
 }>
 
 export type FilterImplementation = {
@@ -86,6 +87,10 @@ declare global {
 
 		interface ScopeInputObjectFieldsField {
 			isConditionContainer?: boolean
+		}
+
+		interface PgCodecAttributeTags {
+			filterConfig?: string[]
 		}
 	}
 }

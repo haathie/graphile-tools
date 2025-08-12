@@ -9,7 +9,7 @@ declare global {
 	}
 }
 
-registerFilterMethod(
+registerFilterMethod<{ fieldName: string }>(
 	'paradedb',
 	{ supportedOnSubscription: false },
 	{
@@ -49,7 +49,7 @@ registerFilterMethod(
 				? sql`jsonb_build_object('included', ${sql.value(from)}::${sqlType})`
 				: sql.null
 			const toSql = to
-				? sql`jsonb_build_object('excluded', ${sql.value(to)}::${sqlType})`
+				? sql`jsonb_build_object('included', ${sql.value(to)}::${sqlType})`
 				: sql.null
 			cond.where(sql`${id} @@@ 
 				jsonb_build_object(
@@ -62,9 +62,12 @@ registerFilterMethod(
 				)	
 			`)
 		},
-		'icontains': (cond, input, { scope: { attrName } }) => {
+		'icontains': (cond, input, { scope: { attrName, config } }) => {
+			const fieldName = config?.fieldName || attrName
 			const id = sql`${cond.alias}.${sql.identifier(attrName)}`
-			return cond.where(sql`${id} @@@ ${sql.value(`"${input}"`)}`)
+			return cond.where(
+				sql`${id} @@@ paradedb.parse(${sql.value(`${fieldName}:"${input}"`)})`
+			)
 		}
 	}
 )

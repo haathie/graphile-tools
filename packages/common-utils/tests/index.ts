@@ -14,7 +14,8 @@ export type BootedGraphileServer = {
 	pgl: PostGraphileInstance
 	schema: GraphQLSchema
 	graphqlRequest: <T>(request: GraphQLRequest) => Promise<T>
-	close: () => Promise<void>
+	closeServer: () => Promise<void>
+	destroy: () => Promise<void>
 }
 
 export type GraphQLRequest = {
@@ -67,10 +68,11 @@ export async function bootPreset(
 		graphqlRequest(req) {
 			return graphqlRequest(`http://localhost:${port}/graphql`, req)
 		},
-		close
+		destroy,
+		closeServer,
 	}
 
-	async function close() {
+	async function closeServer() {
 		await new Promise<void>((resolve, reject) => {
 			srv.close(err => {
 				if(err) {
@@ -83,6 +85,10 @@ export async function bootPreset(
 		})
 
 		await pgl.release()
+	}
+
+	async function destroy() {
+		await closeServer()
 		for(const srv of preset.pgServices || []) {
 			await srv.release?.()
 		}
@@ -144,6 +150,6 @@ async function graphqlRequest<T>(
 	return json.data
 }
 
-function makeRandomPort() {
+export function makeRandomPort() {
 	return Math.floor(Math.random() * (65535 - 1024)) + 1024
 }

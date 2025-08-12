@@ -57,7 +57,7 @@ describe('Fancy Mutations', () => {
 	})
 
 	after(async() => {
-		await srv?.close()
+		await srv?.destroy()
 	})
 
 	it('should correctly generate schemas', async() => {
