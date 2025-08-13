@@ -24,3 +24,11 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+  jaeger:
+    image: cr.jaegertracing.io/jaegertracing/jaeger:2.9.0
+    ports:
+      - '16686:16686'
+      - '4317:4317'
+      - '4318:4318'
+      - '5778:5778'
+      - '9411:9411'

@@ -1,3 +1,6 @@
+import { otelSdk } from './tracing.ts'
+1 // prevent ESLint rule from complaining about the import's order
+
 import { createServer } from 'http'
 import { createHttpTerminator } from 'http-terminator'
 import { postgraphile } from 'postgraphile'
@@ -33,6 +36,8 @@ process.once('SIGINT', async() => {
 	for(const srv of preset.pgServices || []) {
 		await srv.release?.()
 	}
+
+	await otelSdk.shutdown()
 
 	process.exit(0)
 })

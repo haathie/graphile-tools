@@ -4,11 +4,15 @@
 	"scripts": {},
 	"dependencies": {
 		"@graphile/simplify-inflection": "^8.0.0-beta.7",
-		"@haathie/postgraphile-targeted-conditions": "*",
-		"@haathie/postgraphile-realtime": "*",
 		"@haathie/postgraphile-fancy-mutations": "*",
 		"@haathie/postgraphile-rate-limits": "*",
+		"@haathie/postgraphile-realtime": "*",
 		"@haathie/postgraphile-reasonable-limits": "*",
+		"@haathie/postgraphile-targeted-conditions": "*",
+		"@haathie/postgraphile-otel": "*",
+		"@opentelemetry/instrumentation-http": "^0.203.0",
+		"@opentelemetry/instrumentation-pg": "^0.55.0",
+		"@opentelemetry/sdk-node": "^0.203.0",
 		"http-terminator": "^3.2.0"
 	}
 }

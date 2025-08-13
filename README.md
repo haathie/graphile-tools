@@ -141,6 +141,7 @@ Postgraphile & Postgres Tooling Speed Up Going to Production. The repository con
 		]
 	}
 	```
+- [OTEL](/packages/otel/): Provides Tracing Capabilities for GraphQL Requests.
 - [Reasonable Limits](/packages/reasonable-limits/): Postgraphile plugin to enforce reasonable limits on queries, preventing excessive data retrieval.
 
 ## Running the Example

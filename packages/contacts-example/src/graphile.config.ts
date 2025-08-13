@@ -1,5 +1,6 @@
 import { PgSimplifyInflectionPreset } from '@graphile/simplify-inflection'
 import { FancyMutationsPlugin } from '@haathie/postgraphile-fancy-mutations'
+import { OTELPlugin } from '@haathie/postgraphile-otel'
 import { RateLimitsPlugin } from '@haathie/postgraphile-rate-limits'
 import { PgRealtimePlugin } from '@haathie/postgraphile-realtime'
 import { ReasonableLimitsPlugin } from '@haathie/postgraphile-reasonable-limits'
@@ -14,8 +15,9 @@ const preset: GraphileConfig.Preset = {
 		PgSimplifyInflectionPreset
 	],
 	plugins: [
-		PgRealtimePlugin,
+		OTELPlugin,
 		ReasonableLimitsPlugin,
+		PgRealtimePlugin,
 		FancyMutationsPlugin,
 		TargetedConditionsPlugin,
 		RateLimitsPlugin,
@@ -72,7 +74,6 @@ const preset: GraphileConfig.Preset = {
 		pollIntervalMs: 500
 	},
 	grafserv: {
-		// watch: true,
 		websockets: true,
 		maxRequestLength: 1_000_000
 	},
