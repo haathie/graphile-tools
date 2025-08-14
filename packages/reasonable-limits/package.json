@@ -1,14 +1,10 @@
 {
 	"name": "@haathie/postgraphile-reasonable-limits",
-	"version": "0.1.0",
+	"version": "0.1.1",
 	"type": "module",
 	"files": ["lib"],
-	"exports": {
-		".": {
-			"import": "./src/index.ts"
-		},
-		"./package.json": "./package.json"
-	},
+	"main": "lib/index.js",
+	"types": "lib/index.d.ts",
 	"publishConfig": {
 		"access": "public"
 	},
