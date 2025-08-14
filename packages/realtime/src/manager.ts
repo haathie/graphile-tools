@@ -254,7 +254,10 @@ export class SubscriptionManager {
 
 			try {
 				await this.pool.query(
-					'DELETE FROM postg_realtime.subscriptions WHERE id = $1',
+					{
+						name: 'postg_realtime.delete_subscription',
+						text: 'DELETE FROM postg_realtime.subscriptions WHERE id = $1'
+					},
 					[subscriptionId]
 				)
 				DEBUG(`Deleted subscription: ${subscriptionId}`)
@@ -303,7 +306,10 @@ export class SubscriptionManager {
 
 		const now = Date.now()
 		const { rows } = await this.pool.query(
-			'SELECT * FROM postg_realtime.get_events_for_subscriptions($1, $2)',
+			{
+				name: 'postg_realtime.get_events_for_subscriptions',
+				text: 'SELECT * FROM postg_realtime.get_events_for_subscriptions($1, $2)'
+			},
 			[this.deviceId, this.chunkSize]
 		)
 
@@ -387,13 +393,19 @@ export class SubscriptionManager {
 
 	async #pingDevice() {
 		await this.pool.query(
-			'SELECT postg_realtime.mark_device_active($1)',
+			{
+				name: 'postg_realtime.ping_device',
+				text: 'SELECT postg_realtime.mark_device_active($1)'
+			},
 			[this.deviceId]
 		)
 	}
 
 	async maintainEventsTable() {
-		await this.pool.query('SELECT postg_realtime.maintain_events_table()')
+		await this.pool.query({
+			name: 'postg_realtime.maintain_events_table',
+			text: 'SELECT postg_realtime.maintain_events_table()',
+		})
 	}
 
 	async clearTempSubscriptions() {
