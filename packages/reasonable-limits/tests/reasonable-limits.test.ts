@@ -86,11 +86,37 @@ describe('Reasonable Limits', () => {
 			)
 		})
 
+		it('should apply the limit on null limit', async() => {
+			await assert.rejects(
+				() => (
+					srv.graphqlRequest<QueryResult>({
+						query: `query GetBooks($limit: Int) {
+							allBooks(first: $limit) { nodes { id title } }
+						}`,
+						variables: { limit: null }
+					})
+				),
+				(err: GraphQLError) => {
+					assert.match(err.message, /cannot be null without/)
+					return true
+				}
+			)
+		})
+
 		it('should apply the custom default limit', async() => {
 			const res = await srv.graphqlRequest<QueryResult>({
 				query: 'query GetBooks { allBooks { nodes { id title } } }'
 			})
 			assert.strictEqual(res.allBooks.nodes.length, 20)
+		})
+
+		it('should not apply the first limit when using last', async() => {
+			const res = await srv.graphqlRequest<QueryResult>({
+				query: `query GetBooks {
+					allBooks(last: 15, first: null) { nodes { id title } }
+				}`
+			})
+			assert.strictEqual(res.allBooks.nodes.length, 15)
 		})
 	})
 })

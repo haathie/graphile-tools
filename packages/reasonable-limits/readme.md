@@ -33,6 +33,10 @@ COMMENT ON TABLE your_schema.your_table IS $$
 $$;
 ```
 
+Other things to keep in mind:
+- If you set `first` to `null` without setting `last`, an error will be thrown, and vice versa.
+- To fetch the `last` `N` records, please set `first` to `null` too in the request. See this [issue](https://github.com/graphile/crystal/issues/2773#issuecomment-3394119865).
+
 ## Debugging
 
 To debug whether the limit is correctly applied to a "connection" of yours, you can use the `DEBUG` env var:
