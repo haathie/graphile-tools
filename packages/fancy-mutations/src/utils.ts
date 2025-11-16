@@ -21,9 +21,7 @@ export function buildFieldsForCreate(
 	const forwardAttrs = getForwardRelationAttrs(table)
 
 	for(const relationName in table.getRelations()) {
-		const typeName = buildRelatedType(
-			relationName, table, build, path
-		)
+		const typeName = buildRelatedType(relationName, table, build, path)
 		if(!typeName) {
 			continue
 		}
@@ -303,6 +301,12 @@ export const isInsertable = (
 	}
 
 	if(resource.codec.isAnonymous) {
+		return false
+	}
+
+	if(
+		!resource.extensions?.canInsert || !resource.extensions?.isInsertable
+	) {
 		return false
 	}
 

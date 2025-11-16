@@ -1,7 +1,8 @@
 import { type BootedGraphileServer, getSuperuserPool, runDdlAndBoot } from '@haathie/postgraphile-common-utils/tests'
 import assert from 'node:assert'
-import { after, before, describe, it } from 'node:test'
-import { CONFIG } from './config.ts'
+import { after, afterEach, before, beforeEach, describe, it } from 'node:test'
+import type { GraphQLInputObjectType } from 'postgraphile/graphql'
+import { CONFIG, makeMutationsPgService } from './config.ts'
 
 type SimpleUpsertResult = {
 	createAuthors: {
@@ -417,5 +418,49 @@ describe('Bulk & Nested Mutations', () => {
 			['Author 7', 'Author 8']
 		)
 		assert.deepStrictEqual(authors, [{ name: 'Author 8' }])
+	})
+})
+
+describe('Bulk & Nested Mutations with Permissions', () => {
+
+	let srv: BootedGraphileServer
+	beforeEach(async() => {
+		CONFIG.preset.pgServices = [makeMutationsPgService()]
+	})
+
+	afterEach(async() => {
+		await srv?.destroy()
+	})
+
+	it('should prevent bulk create books without insert permissions', async() => {
+		srv = await runDdlAndBoot({
+			...CONFIG,
+			ddl: `
+				${CONFIG.ddl}
+				REVOKE INSERT ON mutations_test.books FROM "muts_user";
+			`,
+		})
+
+		// check that the mutation is not present
+		const schema = srv.schema
+		const mutationFields = schema.getMutationType()?.getFields()
+		assert.ok(mutationFields)
+		assert.ok(!mutationFields.createBooks)
+
+		const createauthor = schema.getType('AuthorInput') as GraphQLInputObjectType
+		assert.ok(!createauthor.getFields().booksByAuthorId)
+
+		const input = [
+			{ name: 'Author 1' },
+			{ name: 'Author 2' }
+		]
+		const {
+			createAuthors: { items }
+		} = await srv.graphqlRequest<SimpleUpsertResult>({
+			query: UPSERT_QL,
+			variables: { onConflict: 'DoNothing', input }
+		})
+
+		assert.strictEqual(items.length, 2)
 	})
 })

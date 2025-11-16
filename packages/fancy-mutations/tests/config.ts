@@ -44,20 +44,37 @@ export const CONFIG: TestGraphileConfig = {
 		$$;
 		comment on constraint books_publisher_id_fkey on mutations_test.books is $$
 		@behaviour +single
-		$$;`,
+		$$;
+		
+		DO $$
+		BEGIN
+			-- create role if it doesn't exist
+			IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'muts_user') THEN
+				CREATE ROLE muts_user NOLOGIN;
+			END IF;
+		END
+		$$;
+		
+		GRANT CONNECT ON DATABASE "postgres" TO muts_user;
+		GRANT USAGE ON SCHEMA mutations_test TO muts_user;
+		GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA mutations_test TO muts_user;
+	`,
 	preset: {
 		extends: [PostGraphileAmberPreset],
 		plugins: [FancyMutationsPlugin],
-		pgServices: [
-			makePgService({
-				// Database connection string, read from an environmental variable:
-				connectionString: process.env.PG_URI,
-				superuserConnectionString: process.env.PG_URI,
-				poolConfig: { min: 0, max: 10 },
-				// List of database schemas to expose:
-				schemas: ['mutations_test'],
-			}),
-		],
+		pgServices: [makeMutationsPgService()],
 		schema: {}
 	}
+}
+
+export function makeMutationsPgService() {
+	return makePgService({
+		// Database connection string, read from an environmental variable:
+		connectionString: process.env.PG_URI,
+		superuserConnectionString: process.env.PG_URI,
+		poolConfig: { min: 0, max: 10 },
+		// List of database schemas to expose:
+		schemas: ['mutations_test'],
+		pgSettingsForIntrospection: {	role: 'muts_user' }
+	})
 }
