@@ -1,6 +1,6 @@
 {
 	"name": "@haathie/postgraphile-fancy-mutations",
-	"version": "0.1.2",
+	"version": "0.1.3",
 	"type": "module",
 	"files": [
 		"lib"
