@@ -53,10 +53,13 @@ export class PgCreateStep extends Step<{ items: PlainObject[] }> {
 	}: ExecutionDetails): ExecutionResults<{ items: PlainObject[] }> {
 		const onConflict = values[this.#onConflictId]
 			.unaryValue() as OnConflictOption
-		const {
-			withPgClient,
-			pgSettings
-		} = values[this.#contextId].unaryValue() as Grafast.Context
+
+		const unary = values[this.#contextId].unaryValue() as Grafast.Context
+		const keyPrefix = this.resource.executor.name !== 'main' ? `${this.resource.executor.name}_` : ''
+		// @ts-expect-error
+		const withPgClient = unary[`${keyPrefix}withPgClient`] as Grafast.Context['withPgClient']
+		// @ts-expect-error
+		const pgSettings = unary[`${keyPrefix}pgSettings`]as Grafast.Context['pgSettings']
 
 		let rowsAdded = 0
 		const container: PgCreateContainer = {
@@ -98,7 +101,7 @@ export class PgCreateStep extends Step<{ items: PlainObject[] }> {
 				+ `with ${rowsAdded} total rows, mode = ${onConflict}`
 			)
 
-			const resolvedRowMap = await withPgClient(pgSettings, async pgClient => {
+			const resolvedRowMap = await withPgClient(pgSettings, async(pgClient) => {
 				await pgClient.query({ text: 'BEGIN' })
 				try {
 					const rslt = await this
