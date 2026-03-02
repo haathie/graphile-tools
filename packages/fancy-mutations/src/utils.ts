@@ -226,7 +226,10 @@ export function getEntityCtx(
 	}
 }
 
-// from: https://github.com/graphile/crystal/blob/da7b7196c627e1151564f185f199a716206da903/graphile-build/graphile-build-pg/src/plugins/PgMutationUpdateDeletePlugin.ts#L154
+// Matches upstream PgMutationUpdateDeletePlugin isUpdatable check (rc.9+)
+// Note: rc.9's PgRegistryReductionPlugin deletes extension flags like
+// canInsert/isInsertable after converting them to behaviors, so we must
+// use behavior matching instead of checking extensions directly.
 export const isUpdatable = (
 	build: GraphileBuild.Build,
 	resource: PgResource<any, any, any, any, any>,
@@ -255,7 +258,7 @@ export const isUpdatable = (
 		&& !!build.behavior.pgResourceMatches(resource, 'resource:update')
 }
 
-// from: https://github.com/graphile/crystal/blob/da7b7196c627e1151564f185f199a716206da903/graphile-build/graphile-build-pg/src/plugins/PgMutationUpdateDeletePlugin.ts#L154
+// Matches upstream PgMutationUpdateDeletePlugin isDeletable check (rc.9+)
 export const isDeletable = (
 	build: GraphileBuild.Build,
 	resource: PgResource<any, any, any, any, any>,
@@ -281,9 +284,10 @@ export const isDeletable = (
 	}
 
 	return !!build.behavior.pgResourceMatches(resource, 'bulkDelete')
+		&& !!build.behavior.pgResourceMatches(resource, 'resource:delete')
 }
 
-// from: https://github.com/graphile/crystal/blob/da7b7196c627e1151564f185f199a716206da903/graphile-build/graphile-build-pg/src/plugins/PgMutationCreatePlugin.ts#L53C1-L62C3
+// Matches upstream PgMutationCreatePlugin isInsertable check (rc.9+)
 export const isInsertable = (
 	build: GraphileBuild.Build,
 	resource: PgResource<any, any, any, any, any>,
@@ -304,20 +308,20 @@ export const isInsertable = (
 		return false
 	}
 
-	if(
-		!resource.extensions?.canInsert || !resource.extensions?.isInsertable
-	) {
-		return false
-	}
-
-	return build.behavior.pgResourceMatches(resource, 'bulkCreate') === true
+	return build.behavior.pgResourceMatches(resource, 'resource:insert') === true
+		&& build.behavior.pgResourceMatches(resource, 'bulkCreate') === true
 }
 
 export const isInsertableAttribute = (
-	build: GraphileBuild.Build,
-	resource: PgCodecAttribute<any, any>,
+	_build: GraphileBuild.Build,
+	attr: PgCodecAttribute<any, any>,
 ) => {
-	return resource.extensions?.canInsert || resource.extensions?.isInsertable
+	// In rc.9+, attribute insertability is determined by behavior matching.
+	// However, for attribute-level checks in the init hook (before schema
+	// build), we fall back to checking if the attribute isn't explicitly
+	// marked as non-insertable via extensions (set before reduction).
+	// The PgCodecsPlugin sets isInsertable=false for generated columns.
+	return attr.extensions?.isInsertable !== false
 }
 
 function buildApplyPlanForCodec(

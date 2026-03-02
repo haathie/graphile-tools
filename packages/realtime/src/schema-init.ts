@@ -13,7 +13,6 @@ type Hook = NonNullable<
 >['init']
 
 export const schemaInitHook: Hook = (init, build) => {
-	const subSrc = SubscriptionManager.current
 	const { input: { pgRegistry: { pgResources } }, inflection } = build
 
 	for(const resource of Object.values(pgResources)) {
@@ -23,7 +22,7 @@ export const schemaInitHook: Hook = (init, build) => {
 
 		const pgInfo = resource.codec.extensions!.pg!
 
-		subSrc.addTableToPublishFor(`"${pgInfo.schemaName}"."${pgInfo.name}"`)
+		SubscriptionManager.queueTable(`"${pgInfo.schemaName}"."${pgInfo.name}"`)
 
 		registerPkType(resource, build)
 
