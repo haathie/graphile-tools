@@ -57,8 +57,25 @@ const PING_INTERVAL_MS = 30 * 1000 // 30 seconds
 const MAINTENANCE_INTERVAL_MS = 15 * 60 * 1000 // 15 minute
 
 export class SubscriptionManager {
+	static $$export = {
+		moduleName: '@haathie/postgraphile-realtime/lib/manager.js',
+		exportName: 'SubscriptionManager',
+	}
 
 	static #current: SubscriptionManager | undefined
+	static #pendingTables: string[] = []
+
+	/**
+	 * Queue a table to be made subscribable. If the manager is not yet
+	 * initialized, the table will be drained into the instance on init().
+	 */
+	static queueTable(tableName: string) {
+		if(SubscriptionManager.#current) {
+			SubscriptionManager.#current.addTableToPublishFor(tableName)
+		} else if(!SubscriptionManager.#pendingTables.includes(tableName)) {
+			SubscriptionManager.#pendingTables.push(tableName)
+		}
+	}
 
 	readonly deviceId: string
 	readonly chunkSize: number
@@ -421,7 +438,13 @@ export class SubscriptionManager {
 			throw new Error('SubscriptionManager already initialized.')
 		}
 
-		return (SubscriptionManager.#current = new SubscriptionManager(options))
+		const instance = new SubscriptionManager(options)
+		for(const table of SubscriptionManager.#pendingTables) {
+			instance.addTableToPublishFor(table)
+		}
+
+		SubscriptionManager.#pendingTables = []
+		return (SubscriptionManager.#current = instance)
 	}
 
 	static get isCurrentInitialized(): boolean {

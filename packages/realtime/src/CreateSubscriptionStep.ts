@@ -7,6 +7,10 @@ import type { PgWhereBuilder } from './PgWhereBuilder.ts'
 import { DEBUG } from './utils.ts'
 
 export class CreateSubscriptionStep extends Step<any> {
+	static $$export = {
+		moduleName: '@haathie/postgraphile-realtime/lib/CreateSubscriptionStep.js',
+		exportName: 'CreateSubscriptionStep',
+	}
 
 	#resource: PgResource
 	#subSrc: SubscriptionManager
@@ -27,7 +31,6 @@ export class CreateSubscriptionStep extends Step<any> {
 	) {
 		super()
 		this.isSyncAndSafe = false
-		this.hasSideEffects = true
 
 		this.#resource = resource
 		this.#subSrc = subSrc
@@ -36,6 +39,11 @@ export class CreateSubscriptionStep extends Step<any> {
 		this.#contextDepId = this.addUnaryDependency(resource.executor.context())
 		this.#whereBuilderDepId = this.addDependency(conditionWhereBuilder)
 		this.#inputArgsDepId = this.addDependency(inputArgs)
+
+		// Must be set AFTER all dependencies are added — grafast marks any step
+		// created after a side-effect step as implicitly dependent on it, so
+		// adding dependencies afterwards would create a cycle.
+		this.hasSideEffects = true
 	}
 
 	execute({ indexMap, values, stream }: ExecutionDetails): ExecutionResults<any> {

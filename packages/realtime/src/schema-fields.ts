@@ -27,7 +27,8 @@ export const schemaFieldsHook: Hook = (
 		input: { pgRegistry: { pgResources } },
 		inflection,
 		getTypeByName,
-		extend
+		extend,
+		EXPORTABLE
 	} = build
 
 	for(const resource of Object.values(pgResources)) {
@@ -73,7 +74,7 @@ export const schemaFieldsHook: Hook = (
 						args: subsArgs,
 						description: `Subscription for new ${resource.name} items`,
 						subscribePlan: createSubscriptionPlan(resource, 'INSERT', build),
-						plan: p => p
+						plan: EXPORTABLE(() => (p: any) => p, [])
 					})
 				),
 				[deletedName]: fieldWithHooks(
@@ -87,7 +88,7 @@ export const schemaFieldsHook: Hook = (
 						args: subsArgs,
 						description: `Subscription for deleted ${resource.name} items`,
 						subscribePlan: createSubscriptionPlan(resource, 'DELETE', build),
-						plan: p => p
+						plan: EXPORTABLE(() => (p: any) => p, [])
 					})
 				),
 				[updatedName]: fieldWithHooks(
@@ -101,7 +102,7 @@ export const schemaFieldsHook: Hook = (
 						args: subsArgs,
 						description: `Subscription for updated ${resource.name} items`,
 						subscribePlan: createSubscriptionPlan(resource, 'UPDATE', build),
-						plan: p => p
+						plan: EXPORTABLE(() => (p: any) => p, [])
 					})
 				)
 			},
@@ -116,23 +117,26 @@ export const schemaFieldsHook: Hook = (
 function createSubscriptionPlan(
 	resource: PgTableResource,
 	kind: PgChangeOp,
-	{ sql: { sql } }: GraphileBuild.Build,
+	build: GraphileBuild.Build,
 ) {
+	const { sql: { sql }, EXPORTABLE } = build
 	const { codec: { extensions: { pg: pgInfo } = {} } } = resource
 	if(!pgInfo) {
 		throw new Error(`Resource ${resource.name} does not have pg info`)
 	}
 
-	const plan: PlanResolver = (parent, args) => {
-		const alias = sql`t`
-		const $whereBuilder = new PgWhereBuilder(alias)
-		args.apply($whereBuilder)
+	return EXPORTABLE(
+		(sql, PgWhereBuilder, CreateSubscriptionStep, SubscriptionManager, resource, kind) =>
+			(parent: any, args: any) => {
+				const alias = sql`t`
+				const $whereBuilder = new PgWhereBuilder(alias)
+				args.apply($whereBuilder)
 
-		const $argsRaw = args.getRaw()
-		return new CreateSubscriptionStep(
-			resource, SubscriptionManager.current, kind, $whereBuilder, $argsRaw
-		)
-	}
-
-	return plan
+				const $argsRaw = args.getRaw()
+				return new CreateSubscriptionStep(
+					resource, SubscriptionManager.current, kind, $whereBuilder, $argsRaw
+				)
+			},
+		[sql, PgWhereBuilder, CreateSubscriptionStep, SubscriptionManager, resource, kind]
+	)
 }

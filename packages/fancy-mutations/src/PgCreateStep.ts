@@ -24,22 +24,29 @@ type RowValue<T> = { constant: T }
 const MAX_BULK_MUTATION_LENGTH = 1000
 
 export class PgCreateStep extends Step<{ items: PlainObject[] }> {
+	static $$export = {
+		moduleName: '@haathie/postgraphile-fancy-mutations/lib/PgCreateStep.js',
+		exportName: 'PgCreateStep',
+	}
 
 	readonly resource: PgTableResource
 	readonly #contextId: number
 	readonly #onConflictId: number
 	readonly #argsDepIds: number[] = []
 	readonly #entityCtxCache: { [rscName: string]: PGEntityCtx<unknown> } = {}
+	readonly #updatableResources: ReadonlySet<string>
 	selectPrimaryColumns = false
 
 	constructor(
 		resource: PgTableResource,
-		onConflict: Step<OnConflictOption>
+		onConflict: Step<OnConflictOption>,
+		updatableResources: ReadonlySet<string>
 	) {
 		super()
 		this.resource = resource
 		this.#onConflictId = this.addUnaryDependency(onConflict)
 		this.#contextId = this.addUnaryDependency(context())
+		this.#updatableResources = updatableResources
 		this.isSyncAndSafe = false
 	}
 
@@ -147,7 +154,7 @@ export class PgCreateStep extends Step<{ items: PlainObject[] }> {
 				}
 
 				let _onConflict = onConflict
-				if(_onConflict === 'replace' && !rsc.extensions?.canUpdate) {
+				if(_onConflict === 'replace' && !this.#updatableResources.has(rscName)) {
 					_onConflict = 'ignore'
 				}
 
@@ -216,6 +223,10 @@ export class PgCreateStep extends Step<{ items: PlainObject[] }> {
 }
 
 export class PgRowBuilder extends Modifier<PgCreateContainer> {
+	static $$export = {
+		moduleName: '@haathie/postgraphile-fancy-mutations/lib/PgCreateStep.js',
+		exportName: 'PgRowBuilder',
+	}
 
 	readonly resource: PgTableResource
 	readonly #values: Record<string, RowValue<unknown>> = {}
@@ -235,10 +246,7 @@ export class PgRowBuilder extends Modifier<PgCreateContainer> {
 
 	apply(): void {
 		const rows = (this.parent.pendingRowMap[this.resource.name] ||= [])
-		// apply is done in the opposite order of creation
-		// so we add the new row builder at the start -- to maintain the order
-		// of the rows
-		rows.unshift(this)
+		rows.push(this)
 	}
 
 	set(key: string, value: unknown): void {

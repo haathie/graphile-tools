@@ -3,6 +3,10 @@ import type { RateLimitParsedTag } from './types.ts'
 import { applyRateLimits } from './utils.ts'
 
 export class RateLimitsStep extends Step<null> {
+	static $$export = {
+		moduleName: '@haathie/postgraphile-rate-limits/lib/RateLimitsStep.js',
+		exportName: 'RateLimitsStep',
+	}
 
 	rateLimits: { [apiName: string]: RateLimitParsedTag[] } = {}
 	contextId: number

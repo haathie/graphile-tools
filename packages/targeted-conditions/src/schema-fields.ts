@@ -12,7 +12,7 @@ type Hook = NonNullable<
 >['GraphQLInputObjectType_fields']
 
 export const fields: Hook = (fieldMap, build, ctx) => {
-	const { behavior, inflection, getTypeByName } = build
+	const { behavior, inflection, getTypeByName, EXPORTABLE } = build
 	const { scope: { pgCodec: _codec, isPgCondition }, fieldWithHooks } = ctx
 	if(!isPgCondition || !_codec?.extensions?.isTableLike) {
 		return fieldMap
@@ -99,7 +99,7 @@ export const fields: Hook = (fieldMap, build, ctx) => {
 			type: remoteResourceCond,
 			extensions: {
 				grafast: {
-					apply(target: PgCondition) {
+					apply: EXPORTABLE((relation, rmtRrscFrom, sql) => (target: PgCondition) => {
 						const wherePlan = target
 							.existsPlan({ alias: 't', tableExpression: rmtRrscFrom })
 
@@ -119,7 +119,7 @@ export const fields: Hook = (fieldMap, build, ctx) => {
 						wherePlan.where(sql`(${localAttrsJoined}) = (${remoteAttrsJoined})`)
 
 						return wherePlan
-					}
+					}, [relation, rmtRrscFrom, sql])
 				}
 			}
 		}

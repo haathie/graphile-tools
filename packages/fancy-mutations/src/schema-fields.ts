@@ -57,7 +57,7 @@ function getBulkDeleteFields(
 	resource: PgTableResource,
 	{ fieldWithHooks }: GraphileBuild.ContextObjectFields
 ) {
-	const { inflection, getOutputTypeByName } = build
+	const { inflection, getOutputTypeByName, EXPORTABLE } = build
 	const deleteFieldName = inflection.bulkDeleteOperationName(resource)
 
 	const conditionArg = getInputConditionForResource(resource, build)
@@ -80,9 +80,9 @@ function getBulkDeleteFields(
 						type: conditionArg,
 						extensions: {
 							grafast: {
-								applyPlan(plan, fields: PgSelectStep, input) {
+								applyPlan: EXPORTABLE(() => (_plan, fields: PgSelectStep, input) => {
 									input.apply(fields, rslt => rslt.whereBuilder())
-								}
+								}, [])
 							}
 						}
 					}
@@ -90,17 +90,17 @@ function getBulkDeleteFields(
 				type: getOutputTypeByName(
 					inflection.bulkMutationPayloadName(resource)
 				),
-				plan,
+				plan: EXPORTABLE(
+					(PgSelectAndModify, resource) => () => {
+						const step = new PgSelectAndModify({ resource, identifiers: [] })
+						step.delete()
+						return step
+					},
+					[PgSelectAndModify, resource]
+				),
 				description: `Delete one or more ${resource.name} items`
 			}
 		)
-	}
-
-	function plan() {
-		const step = new PgSelectAndModify({ resource, identifiers: [] })
-		step.delete()
-
-		return step
 	}
 }
 
@@ -109,7 +109,7 @@ function getBulkUpdateFields(
 	resource: PgTableResource,
 	{ fieldWithHooks }: GraphileBuild.ContextObjectFields
 ) {
-	const { inflection, getOutputTypeByName } = build
+	const { inflection, getOutputTypeByName, EXPORTABLE } = build
 	const fieldName = inflection.bulkUpdateOperationName(resource)
 
 	const conditionArg = getInputConditionForResource(resource, build)
@@ -140,9 +140,9 @@ function getBulkUpdateFields(
 						type: conditionArg,
 						extensions: {
 							grafast: {
-								applyPlan(plan, fields: PgSelectStep, input) {
+								applyPlan: EXPORTABLE(() => (_plan, fields: PgSelectStep, input) => {
 									input.apply(fields, rslt => rslt.whereBuilder())
-								}
+								}, [])
 							}
 						}
 					},
@@ -150,9 +150,9 @@ function getBulkUpdateFields(
 						type: patchType,
 						extensions: {
 							grafast: {
-								applyPlan(plan, fields: PgSelectAndModify, input) {
+								applyPlan: EXPORTABLE(() => (_plan, fields: PgSelectAndModify, input) => {
 									input.apply(fields, () => fields)
-								}
+								}, [])
 							}
 						}
 					}
@@ -160,17 +160,17 @@ function getBulkUpdateFields(
 				type: getOutputTypeByName(
 					inflection.bulkMutationPayloadName(resource)
 				),
-				plan,
+				plan: EXPORTABLE(
+					(PgSelectAndModify, resource) => () => {
+						const step = new PgSelectAndModify({ resource, identifiers: [] })
+						step.update()
+						return step
+					},
+					[PgSelectAndModify, resource]
+				),
 				description: `Update one or more ${resource.name} items`
 			}
 		)
-	}
-
-	function plan() {
-		const step = new PgSelectAndModify({ resource, identifiers: [] })
-		step.update()
-
-		return step
 	}
 }
 
@@ -182,6 +182,7 @@ function getBulkCreateFields(
 	const {
 		inflection,
 		getOutputTypeByName,
+		EXPORTABLE,
 		graphql: { GraphQLNonNull, GraphQLList }
 	} = build
 	const fieldName = inflection.bulkCreateOperationName(resource)
@@ -193,6 +194,16 @@ function getBulkCreateFields(
 	const OnConflictOptions = build.getTypeByName(
 		inflection.onConflictEnumName()
 	) as GraphQLEnumType
+
+	// precompute updatable resources at schema build time
+	// so the step can check at runtime without needing build
+	// stored as array for graphile-export serialization compatibility
+	const updatableResourceNames: string[] = []
+	for(const [name, rsc] of Object.entries(build.input.pgRegistry.pgResources)) {
+		if(isUpdatable(build, rsc)) {
+			updatableResourceNames.push(name)
+		}
+	}
 
 	return {
 		[fieldName]: fieldWithHooks(
@@ -213,14 +224,14 @@ function getBulkCreateFields(
 						),
 						extensions: {
 							grafast: {
-								applyPlan(_, plan: PgCreateStep, input) {
+								applyPlan: EXPORTABLE(() => (_, plan: PgCreateStep, input) => {
 									return input.apply(plan, p => (
 										// returning a fn, as "items" is a list
 										// this'll create a new row builder for
 										// each item
 										() => p.addRowBuilder()
 									))
-								}
+								}, [])
 							}
 						}
 					}
@@ -228,13 +239,14 @@ function getBulkCreateFields(
 				type: getOutputTypeByName(
 					inflection.bulkMutationPayloadName(resource)
 				),
-				plan,
+				plan: EXPORTABLE(
+					(PgCreateStep, resource, updatableResourceNames) => (...[, args]: GrafastPlanParams) => {
+						return new PgCreateStep(resource, args.getRaw('onConflict'), new Set(updatableResourceNames))
+					},
+					[PgCreateStep, resource, updatableResourceNames]
+				),
 				description: `Create one or more ${resource.name} items`
 			}
 		)
-	}
-
-	function plan(...[, args]: GrafastPlanParams) {
-		return new PgCreateStep(resource, args.getRaw('onConflict'))
 	}
 }

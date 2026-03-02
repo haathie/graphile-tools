@@ -13,7 +13,6 @@ type Hook = NonNullable<
 >['init']
 
 export const schemaInitHook: Hook = (init, build) => {
-	const subSrc = SubscriptionManager.current
 	const { input: { pgRegistry: { pgResources } }, inflection } = build
 
 	for(const resource of Object.values(pgResources)) {
@@ -23,7 +22,7 @@ export const schemaInitHook: Hook = (init, build) => {
 
 		const pgInfo = resource.codec.extensions!.pg!
 
-		subSrc.addTableToPublishFor(`"${pgInfo.schemaName}"."${pgInfo.name}"`)
+		SubscriptionManager.queueTable(`"${pgInfo.schemaName}"."${pgInfo.name}"`)
 
 		registerPkType(resource, build)
 
@@ -47,6 +46,7 @@ function registerCreateType(
 ) {
 	const {
 		inflection,
+		EXPORTABLE,
 		graphql: { GraphQLNonNull, GraphQLList },
 		grafast: { loadMany },
 		registerObjectType,
@@ -72,11 +72,11 @@ function registerCreateType(
 							new GraphQLList(new GraphQLNonNull(createdType))
 						),
 						description: `New ${resource.name} items created`,
-						plan(parent: Step<PgChangeEvent>) {
+						plan: EXPORTABLE((loadMany) => (parent: Step<PgChangeEvent>) => {
 							return loadMany(parent, (values) => (
 								values.map(v => v.items.map(v => v.row_data))
 							))
-						}
+						}, [loadMany])
 					}
 				}
 			}
@@ -91,6 +91,7 @@ function registerDeleteType(
 ) {
 	const {
 		inflection,
+		EXPORTABLE,
 		graphql: { GraphQLNonNull, GraphQLList },
 		grafast: { loadMany },
 		registerObjectType,
@@ -116,11 +117,11 @@ function registerDeleteType(
 							new GraphQLList(new GraphQLNonNull(pkType))
 						),
 						description: `The ${resource.name} items that were deleted`,
-						plan(parent: Step<PgChangeEvent>) {
+						plan: EXPORTABLE((loadMany) => (parent: Step<PgChangeEvent>) => {
 							return loadMany(parent, (values) => (
 								values.map(({ items }) => items.map(v => v.row_data))
 							))
-						}
+						}, [loadMany])
 					}
 				}
 			}
@@ -135,6 +136,7 @@ function registerUpdateType(
 ) {
 	const {
 		inflection,
+		EXPORTABLE,
 		graphql: { GraphQLNonNull, GraphQLList },
 		grafast: { loadMany },
 		registerObjectType,
@@ -182,13 +184,13 @@ function registerUpdateType(
 							new GraphQLList(new GraphQLNonNull(updatedType))
 						),
 						description: `The ${resource.name} items that were updated`,
-						plan(parent: Step<PgChangeEvent>) {
+						plan: EXPORTABLE((loadMany) => (parent: Step<PgChangeEvent>) => {
 							return loadMany(parent, (values) => (
 								values.map(v => (
 									v.items.map(v => ({ key: v.row_before!, patch: v.diff! }))
 								))
 							))
-						}
+						}, [loadMany])
 					}
 				}
 			}
@@ -349,6 +351,7 @@ function registerPartialType(
 
 function createEventIdField(
 	{
+		EXPORTABLE,
 		graphql: { GraphQLNonNull, GraphQLString },
 		grafast: { lambda },
 	}: GraphileBuild.Build
@@ -356,9 +359,9 @@ function createEventIdField(
 	return {
 		type: new GraphQLNonNull(GraphQLString),
 		description: 'ID of the event',
-		plan(parent: Step<PgChangeEvent>) {
+		plan: EXPORTABLE((lambda) => (parent: Step<PgChangeEvent>) => {
 			return lambda(parent, p => p.eventId)
-		}
+		}, [lambda])
 	}
 }
 
@@ -366,32 +369,36 @@ function wrapWithSetAccess(
 	extensions: GraphQLFieldExtensions<any, any> | undefined,
 	attributeName: string,
 	fieldName: string,
-	{ grafast: { AccessStep, LoadedRecordStep } }: GraphileBuild.Build
+	{ grafast: { AccessStep, LoadedRecordStep }, EXPORTABLE }: GraphileBuild.Build
 ): GraphQLFieldExtensions<any, any> {
 	const ogPlan = extensions?.grafast?.plan
 	return {
 		grafast: {
 			...extensions?.grafast,
-			plan: (parent: Step, args, info) => {
-				const steps = parent.operationPlan
-					.getStepsByStepClass(CreateSubscriptionStep)
-				for(const step of steps) {
-					step.diffOnlyFields.add(attributeName)
-				}
+			plan: EXPORTABLE(
+				(CreateSubscriptionStep, attributeName, ogPlan, AccessStep, LoadedRecordStep, fieldName) =>
+					(parent: Step, args, info) => {
+						const steps = parent.operationPlan
+							.getStepsByStepClass(CreateSubscriptionStep)
+						for(const step of steps) {
+							step.diffOnlyFields.add(attributeName)
+						}
 
-				if(ogPlan) {
-					return ogPlan(parent, args, info)
-				}
+						if(ogPlan) {
+							return ogPlan(parent, args, info)
+						}
 
-				if(parent instanceof AccessStep || parent instanceof LoadedRecordStep) {
-					return parent.get(fieldName)
-				}
+						if(parent instanceof AccessStep || parent instanceof LoadedRecordStep) {
+							return parent.get(fieldName)
+						}
 
-				throw new Error(
-					'Expected parent to be an AccessStep/LoadedRecordStep, but got: ' +
-					`${parent.constructor.name} for field ${fieldName}`
-				)
-			}
+						throw new Error(
+							'Expected parent to be an AccessStep/LoadedRecordStep, but got: ' +
+							`${parent.constructor.name} for field ${fieldName}`
+						)
+					},
+				[CreateSubscriptionStep, attributeName, ogPlan, AccessStep, LoadedRecordStep, fieldName]
+			)
 		}
 	}
 }
