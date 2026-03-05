@@ -4,7 +4,7 @@ import {
 	pgWhereConditionSpecListToSQL,
 } from 'postgraphile/@dataplan/pg'
 import { type ApplyInputStep, ConstantStep, type ExecutionDetails, type ExecutionResults, Step } from 'postgraphile/grafast'
-import { type SQL } from 'postgraphile/pg-sql2'
+import { isSQL, type SQL } from 'postgraphile/pg-sql2'
 
 export class PgWhereBuilder extends Step<SQL | undefined>
 	implements PgConditionCapableParent {
@@ -20,7 +20,11 @@ export class PgWhereBuilder extends Step<SQL | undefined>
 	}
 
 	where(condition: PgWhereConditionSpec<any>): void {
-		this.condition = condition as SQL
+		if(!isSQL(condition)) {
+			throw new Error('Condition must be a SQL expression')
+		}
+
+		this.condition = condition
 	}
 
 	having(): void {
