@@ -306,6 +306,10 @@ export const isInsertable = (
 		return false
 	}
 
+	if(!resource.extensions?.canInsert) {
+		return false
+	}
+
 	return build.behavior.pgResourceMatches(resource, 'bulkCreate') === true
 }
 
