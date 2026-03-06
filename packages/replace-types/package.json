@@ -1,0 +1,24 @@
+{
+	"name": "@haathie/postgraphile-replace-types",
+	"version": "0.1.0",
+	"type": "module",
+	"files": ["lib"],
+	"main": "lib/index.js",
+	"types": "lib/index.d.ts",
+	"publishConfig": {
+		"access": "public"
+	},
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/haathie/graphile-tools.git"
+	},
+	"scripts": {
+		"build": "tsc -p tsconfig.json"
+	},
+	"dependencies": {
+		"@haathie/postgraphile-common-utils": "^0.1.2"
+	},
+	"peerDependencies": {
+		"postgraphile": "*"
+	}
+}
