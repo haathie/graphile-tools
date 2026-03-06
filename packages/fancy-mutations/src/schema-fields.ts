@@ -194,6 +194,15 @@ function getBulkCreateFields(
 		inflection.onConflictEnumName()
 	) as GraphQLEnumType
 
+	// precompute updatable resources at schema build time
+	// so the step can check at runtime without needing build
+	const updatableResources = new Set<string>()
+	for(const [name, rsc] of Object.entries(build.input.pgRegistry.pgResources)) {
+		if(isUpdatable(build, rsc)) {
+			updatableResources.add(name)
+		}
+	}
+
 	return {
 		[fieldName]: fieldWithHooks(
 			{
@@ -235,6 +244,6 @@ function getBulkCreateFields(
 	}
 
 	function plan(...[, args]: GrafastPlanParams) {
-		return new PgCreateStep(resource, args.getRaw('onConflict'))
+		return new PgCreateStep(resource, args.getRaw('onConflict'), updatableResources)
 	}
 }

@@ -30,16 +30,19 @@ export class PgCreateStep extends Step<{ items: PlainObject[] }> {
 	readonly #onConflictId: number
 	readonly #argsDepIds: number[] = []
 	readonly #entityCtxCache: { [rscName: string]: PGEntityCtx<unknown> } = {}
+	readonly #updatableResources: ReadonlySet<string>
 	selectPrimaryColumns = false
 
 	constructor(
 		resource: PgTableResource,
-		onConflict: Step<OnConflictOption>
+		onConflict: Step<OnConflictOption>,
+		updatableResources: ReadonlySet<string>
 	) {
 		super()
 		this.resource = resource
 		this.#onConflictId = this.addUnaryDependency(onConflict)
 		this.#contextId = this.addUnaryDependency(context())
+		this.#updatableResources = updatableResources
 		this.isSyncAndSafe = false
 	}
 
@@ -147,7 +150,7 @@ export class PgCreateStep extends Step<{ items: PlainObject[] }> {
 				}
 
 				let _onConflict = onConflict
-				if(_onConflict === 'replace' && !rsc.extensions?.canUpdate) {
+				if(_onConflict === 'replace' && !this.#updatableResources.has(rscName)) {
 					_onConflict = 'ignore'
 				}
 
@@ -235,10 +238,7 @@ export class PgRowBuilder extends Modifier<PgCreateContainer> {
 
 	apply(): void {
 		const rows = (this.parent.pendingRowMap[this.resource.name] ||= [])
-		// apply is done in the opposite order of creation
-		// so we add the new row builder at the start -- to maintain the order
-		// of the rows
-		rows.unshift(this)
+		rows.push(this)
 	}
 
 	set(key: string, value: unknown): void {

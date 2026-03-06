@@ -10,8 +10,8 @@
     "packages/*"
   ],
   "scripts": {
-    "build:all": "npm run build --workspaces --if-present",
-    "lint": "eslint packages/* --ext .js,.ts,.jsx,.tsx",
+    "build": "npm run build --workspaces --if-present",
+    "lint": "eslint",
     "lint:fix": "npm run lint -- --fix",
     "run-file": "sh scripts/run-with-env.sh",
     "test": "NODE_ENV=test sh scripts/run-with-env.sh --test",
@@ -32,9 +32,10 @@
     "@types/express": "^5.0.2",
     "@types/node": "^22.15.29",
     "chance": "^1.1.8",
-    "eslint": "^8.16.0",
+    "eslint": "^9.39.3",
     "pg": "^8.6.0",
+    "postgraphile": "^5.0.0-rc.9",
     "typescript": "^5.0.0",
-    "postgraphile": "5.0.0-beta.44"
+    "typescript-eslint": "^8.56.1"
   }
 }

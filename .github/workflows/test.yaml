@@ -12,7 +12,7 @@ jobs:
     timeout-minutes: 20
     steps:
     - uses: actions/checkout@v4
-    
+
     - name: Start Services
       run: docker compose -f ci.docker-compose.yaml up -d --wait
 
@@ -27,12 +27,12 @@ jobs:
       with:
         path: node_modules
         key: ${{ runner.os }}-node-${{ hashFiles('**/package-lock.json') }}
-          
+
     - name: Install Dependencies
       if: steps.cache-node-modules.outputs.cache-hit != 'true'
       id: npm-ci
       run: npm ci
-      
+
     - name: Save Cache
       # This step ensures the cache is saved even if subsequent steps fail
       uses: actions/cache/save@v4
@@ -42,7 +42,7 @@ jobs:
         key: ${{ steps.cache-node-modules.outputs.cache-primary-key }}
 
     - name: Build
-      run: npm run build:all
+      run: npm run build
 
     - name: Lint
       run: npm run lint
