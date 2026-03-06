@@ -103,19 +103,23 @@ FILTER_METHOD_TESTS.forEach(({ method, additionalSql }, i) => describe(`${method
 		}
 
 		await pool.query(`
-			comment on column "conditions_test"."authors".name is $$
-			@behaviour filterType:icontains filterType:eq filterMethod:${method}
-			@filterConfig icontains:{"fieldName":"name_ngram"}
-			$$;
-	
-			comment on column "conditions_test"."authors".nicknames is $$
-			@behaviour filterType:icontains filterType:eq filterType:eqIn filterMethod:${method}
-			@filterConfig icontains:{"fieldName":"nicknames_ngram"}
-			$$;
-	
-			comment on column "conditions_test"."authors".id is $$
-			@behaviour filterType:eq filterType:eqIn filterType:range filterMethod:${method}
-			$$;
+		comment on column "conditions_test"."authors".name is $$
+		@behaviour filterType:icontains filterType:eq filterMethod:${method}
+		@filterConfig icontains:{"fieldName":"name_ngram"}
+		$$;
+
+		comment on column "conditions_test"."authors".nicknames is $$
+		@behaviour filterType:icontains filterType:eq filterType:eqIn filterMethod:${method}
+		@filterConfig icontains:{"fieldName":"nicknames_ngram"}
+		$$;
+
+		comment on column "conditions_test"."authors".id is $$
+		@behaviour filterType:eq filterType:eqIn filterType:range filterMethod:${method}
+		$$;
+
+		comment on column "conditions_test"."publishers".name is $$
+		@behaviour filterType:eq filterRequired
+		$$;
 		`)
 
 		srv = await bootPreset(CONFIG.preset, makeRandomPort())
@@ -195,6 +199,21 @@ FILTER_METHOD_TESTS.forEach(({ method, additionalSql }, i) => describe(`${method
 			.type as GraphQLInputObjectType
 
 		assert.equal(bookCondition, schema.getType('BookCondition'))
+	})
+
+	it('should make filterRequired fields non-null', async() => {
+		const schema = srv.schema
+
+		const publisherCondition = schema
+			.getType('PublisherCondition') as GraphQLInputObjectType
+		assert.ok(publisherCondition)
+
+		const nameField = publisherCondition.getFields().name
+		assert.ok(nameField)
+		assert.equal(
+			nameField.type.toString(),
+			'PublishersNameCondition!'
+		)
 	})
 
 	describe('Eq', () => {

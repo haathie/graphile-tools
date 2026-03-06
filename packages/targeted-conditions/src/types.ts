@@ -62,6 +62,7 @@ interface FilterBehaviours extends
 	Record<`filterType:${FilterType}`, true>,
 	Record<`filterMethod:${FilterMethod}`, true> {
 	'filterable': true
+	'filterRequired': true
 }
 
 declare global {

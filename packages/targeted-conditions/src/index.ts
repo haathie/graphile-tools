@@ -23,6 +23,10 @@ export const TargetedConditionsPlugin: GraphileConfig.Plugin = {
 					description: 'Allow filtering using by fields on this relation',
 					entities: ['pgCodecRef', 'pgRefDefinition']
 				},
+				'filterRequired': {
+					description: 'Make the filter condition required',
+					entities: ['pgCodecAttribute'],
+				},
 				...Object.entries(FILTER_TYPES_MAP).reduce(
 					(acc, [filterType, { description }]) => {
 						const behaviourName = `filterType:${filterType as FilterType}` as const

@@ -1,7 +1,7 @@
 import { getInputConditionForResource } from '@haathie/postgraphile-common-utils'
 import type { PgCodecWithAttributes, PgCondition } from 'postgraphile/@dataplan/pg'
 import type { InputObjectFieldApplyResolver } from 'postgraphile/grafast'
-import type { GraphQLInputFieldConfig, GraphQLInputObjectType } from 'postgraphile/graphql'
+import type { GraphQLInputFieldConfig, GraphQLInputObjectType, GraphQLNonNull } from 'postgraphile/graphql'
 import { type SQL, sql } from 'postgraphile/pg-sql2'
 import { getFilterTypesForAttribute } from './utils.ts'
 
@@ -38,11 +38,19 @@ export const fields: Hook = (fieldMap, build, ctx) => {
 			)
 		}
 
+		const isRequired = behavior.pgCodecAttributeMatches(
+			[pgCodec, attrName],
+			'filterRequired'
+		)
+		const fieldType = isRequired
+			? new build.graphql.GraphQLNonNull(type)
+			: type
+
 		const fieldName = inflection
 			.attribute({ attributeName: attrName, codec: pgCodec })
 		fieldMap[fieldName] = fieldWithHooks(
 			{ fieldName, isConditionContainer: true },
-			() => ({ extensions: { grafast: { apply: passThroughApply } }, type })
+			() => ({ extensions: { grafast: { apply: passThroughApply } }, type: fieldType })
 		)
 	}
 
