@@ -255,7 +255,6 @@ export const isUpdatable = (
 	}
 
 	return !!build.behavior.pgResourceMatches(resource, 'bulkUpdate')
-		&& !!build.behavior.pgResourceMatches(resource, 'resource:update')
 }
 
 // Matches upstream PgMutationUpdateDeletePlugin isDeletable check (rc.9+)
