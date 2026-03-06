@@ -197,7 +197,7 @@ function getBulkCreateFields(
 
 	// precompute updatable resources at schema build time
 	// so the step can check at runtime without needing build
-	// stored as array for graphile-export serialization compatibility
+	// stored as array for graphile-export serialization, converted to Set in EXPORTABLE
 	const updatableResourceNames: string[] = []
 	for(const [name, rsc] of Object.entries(build.input.pgRegistry.pgResources)) {
 		if(isUpdatable(build, rsc)) {

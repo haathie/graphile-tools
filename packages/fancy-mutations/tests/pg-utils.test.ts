@@ -46,7 +46,11 @@ describe('PG Utils', () => {
 		const ddl = CONFIG.ddl.replaceAll('mutations_test', SCHEMA_NAME)
 		pool = getSuperuserPool(CONFIG.preset)
 
-		await pool.query(`BEGIN;${ddl}COMMIT;`)
+		// Don't wrap in BEGIN/COMMIT to avoid holding locks on shared
+		// catalog tuples (like muts_user role) across the whole DDL block,
+		// which causes "tuple concurrently updated" errors when other test
+		// suites run in parallel.
+		await pool.query(ddl)
 	})
 
 	after(async() => {
