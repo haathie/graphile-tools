@@ -134,62 +134,61 @@ function getOutputItems(
 function createSelectAffectedRowsPlan(build: GraphileBuild.Build) {
 	const { sql, EXPORTABLE, grafast: { lambda }, dataplanPg: { TYPES } } = build
 	return EXPORTABLE(
-		(PgSelectAndModify, PgCreateStep, sql, lambda, TYPES) =>
-			(...[$plan]: GrafastPlanParams<PgCreateStep | PgSelectAndModify>) => {
-				if($plan instanceof PgSelectAndModify) {
-					return $plan
-				}
+		(PgCreateStep, PgSelectAndModify, TYPES, lambda, sql) => (...[$plan]: GrafastPlanParams<PgCreateStep | PgSelectAndModify>) => {
+			if($plan instanceof PgSelectAndModify) {
+				return $plan
+			}
 
-				if(!($plan instanceof PgCreateStep)) {
-					throw new Error(`Expected a PgCreateStep, got ${$plan}`)
-				}
+			if(!($plan instanceof PgCreateStep)) {
+				throw new Error(`Expected a PgCreateStep, got ${$plan}`)
+			}
 
-				$plan.selectPrimaryColumns = true
+			$plan.selectPrimaryColumns = true
 
-				const table = $plan.resource
-				const primaryKey = table.uniques.find(u => u.isPrimary)!
-				if(!primaryKey) {
-					// if we don't have a primary key, we can't insert
-					// because we won't be able to return the inserted item
-					throw new Error(
-						`No primary key for resource ${table.name}, cannot select`
-					)
-				}
-
-				const pkeyColumnsJoined = sql.join(
-					primaryKey.attributes.map(a => (
-						sql`${sql.identifier(a)} ${table.codec.attributes[a].codec.sqlType}`
-					)),
-					','
+			const table = $plan.resource
+			const primaryKey = table.uniques.find(u => u.isPrimary)!
+			if(!primaryKey) {
+				// if we don't have a primary key, we can't insert
+				// because we won't be able to return the inserted item
+				throw new Error(
+					`No primary key for resource ${table.name}, cannot select`
 				)
+			}
 
-				const $items = table.find()
-				const $rowsParam = $items
-					.placeholder(lambda($plan, r => JSON.stringify(r.items)), TYPES.jsonb, true)
-				$items.join(
-					{
-						type: 'inner',
-						from: sql`ROWS FROM (
+			const pkeyColumnsJoined = sql.join(
+				primaryKey.attributes.map(a => (
+					sql`${sql.identifier(a)} ${table.codec.attributes[a].codec.sqlType}`
+				)),
+				','
+			)
+
+			const $items = table.find()
+			const $rowsParam = $items
+				.placeholder(lambda($plan, r => JSON.stringify(r.items)), TYPES.jsonb, true)
+			$items.join(
+				{
+					type: 'inner',
+					from: sql`ROWS FROM (
 							jsonb_to_recordset(${$rowsParam})
 							AS (${pkeyColumnsJoined})) WITH ORDINALITY`,
-						alias: sql`items`,
-						conditions: primaryKey.attributes.map(a => (
-							sql`${$items.alias}.${sql.identifier(a)} = items.${sql.identifier(a)}`
-						))
-					}
-				)
-				// order by the ordinal position
-				// so that the items are returned in the same order as they were inserted
-				$items.orderBy({
-					fragment: sql`items.ordinality`,
-					codec: TYPES.int,
-					direction: 'ASC'
-				})
-				$items.setOrderIsUnique()
+					alias: sql`items`,
+					conditions: primaryKey.attributes.map(a => (
+						sql`${$items.alias}.${sql.identifier(a)} = items.${sql.identifier(a)}`
+					))
+				}
+			)
+			// order by the ordinal position
+			// so that the items are returned in the same order as they were inserted
+			$items.orderBy({
+				fragment: sql`items.ordinality`,
+				codec: TYPES.int,
+				direction: 'ASC'
+			})
+			$items.setOrderIsUnique()
 
-				return $items
-			},
-		[PgSelectAndModify, PgCreateStep, sql, lambda, TYPES]
+			return $items
+		},
+		[PgCreateStep, PgSelectAndModify, TYPES, lambda, sql]
 	)
 }
 

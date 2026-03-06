@@ -36,42 +36,42 @@ export const ReasonableLimitsPlugin: GraphileConfig.Plugin = {
 
 				const ogPlan = fields.plan
 				fields.plan = EXPORTABLE(
-					(sideEffect, GraphQLError, maxValue, ogPlan) =>
-						(...params) => {
-							const [, args] = params
-							sideEffect(args.getRaw(), arg => {
-								assertLessThanMax(arg, 'first', maxValue)
-								assertLessThanMax(arg, 'last', maxValue)
+					(GraphQLError, maxValue, ogPlan, sideEffect) => (...params) => {
+						const [, args] = params
+						sideEffect(args.getRaw(), arg => {
+							assertLessThanMax(arg, 'first', maxValue)
+							assertLessThanMax(arg, 'last', maxValue)
 
-								if(
-									typeof arg.first === 'number'
+							if(
+								typeof arg.first === 'number'
 									|| typeof arg.last === 'number'
-								) {
-									return
-								}
-
-								if(arg.first === null || arg.last === null) {
-									throw new GraphQLError(
-										'"first" or "last" cannot be null without a number being provided'
-										+ ' for the other',
-										{ extensions: { statusCode: 400 } }
-									)
-								}
-							})
-
-							return ogPlan?.(...params)
-
-							function assertLessThanMax(obj: any, key: string, max: number) {
-								const value = obj[key]
-								if(typeof value === 'number' && value > max) {
-									throw new GraphQLError(
-										`Maximum of ${max} ${key} records can be requested per page`,
-										{ extensions: { statusCode: 400 } }
-									)
-								}
+							) {
+								return
 							}
-						},
-					[sideEffect, GraphQLError, maxValue, ogPlan]
+
+							if(arg.first === null || arg.last === null) {
+								throw new GraphQLError(
+									'"first" or "last" cannot be null without a number being provided'
+										+ ' for the other',
+									{ extensions: { statusCode: 400 } }
+								)
+							}
+						})
+
+						return ogPlan?.(...params)
+
+						// eslint-disable-next-line unicorn/consistent-function-scoping
+						function assertLessThanMax(obj: any, key: string, max: number) {
+							const value = obj[key]
+							if(typeof value === 'number' && value > max) {
+								throw new GraphQLError(
+									`Maximum of ${max} ${key} records can be requested per page`,
+									{ extensions: { statusCode: 400 } }
+								)
+							}
+						}
+					},
+					[GraphQLError, maxValue, ogPlan, sideEffect]
 				)
 
 				return fields

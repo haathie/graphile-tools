@@ -1,5 +1,4 @@
 import { getInputConditionForResource } from '@haathie/postgraphile-common-utils'
-import type { FieldPlanResolver } from 'postgraphile/grafast'
 import type { GraphQLObjectType } from 'postgraphile/graphql'
 import { CreateSubscriptionStep } from './CreateSubscriptionStep.ts'
 import { type PgChangeOp, SubscriptionManager } from './manager.ts'
@@ -13,7 +12,6 @@ type Hook = NonNullable<
 	>['hooks']
 >['GraphQLObjectType_fields']
 
-type PlanResolver = FieldPlanResolver<any, any, any>
 
 export const schemaFieldsHook: Hook = (
 	fields, build, ctx
@@ -126,17 +124,16 @@ function createSubscriptionPlan(
 	}
 
 	return EXPORTABLE(
-		(sql, PgWhereBuilder, CreateSubscriptionStep, SubscriptionManager, resource, kind) =>
-			(parent: any, args: any) => {
-				const alias = sql`t`
-				const $whereBuilder = new PgWhereBuilder(alias)
-				args.apply($whereBuilder)
+		(CreateSubscriptionStep, PgWhereBuilder, SubscriptionManager, kind, resource, sql) => (parent: any, args: any) => {
+			const alias = sql`t`
+			const $whereBuilder = new PgWhereBuilder(alias)
+			args.apply($whereBuilder)
 
-				const $argsRaw = args.getRaw()
-				return new CreateSubscriptionStep(
-					resource, SubscriptionManager.current, kind, $whereBuilder, $argsRaw
-				)
-			},
-		[sql, PgWhereBuilder, CreateSubscriptionStep, SubscriptionManager, resource, kind]
+			const $argsRaw = args.getRaw()
+			return new CreateSubscriptionStep(
+				resource, SubscriptionManager.current, kind, $whereBuilder, $argsRaw
+			)
+		},
+		[CreateSubscriptionStep, PgWhereBuilder, SubscriptionManager, kind, resource, sql]
 	)
 }

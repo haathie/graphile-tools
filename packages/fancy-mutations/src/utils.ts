@@ -330,14 +330,13 @@ function buildApplyPlanForCodec(
 ) {
 	const fieldAttrMap = buildFieldNameToAttrNameMap(codec, inflection)
 	return EXPORTABLE(
-		(fieldAttrMap, name, mapFieldsToAttrs) =>
-			(($step, input) => {
-				if(!fieldAttrMap) {
-					return $step.set(name, input)
-				}
+		(fieldAttrMap, mapFieldsToAttrs, name) => (($step, input) => {
+			if(!fieldAttrMap) {
+				return $step.set(name, input)
+			}
 
-				return $step.set(name, mapFieldsToAttrs(input, fieldAttrMap))
-			}) as InputObjectFieldApplyResolver<PgRowBuilder>,
-		[fieldAttrMap, name, mapFieldsToAttrs]
+			return $step.set(name, mapFieldsToAttrs(input, fieldAttrMap))
+		}) as InputObjectFieldApplyResolver<PgRowBuilder>,
+		[fieldAttrMap, mapFieldsToAttrs, name]
 	)
 }

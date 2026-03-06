@@ -376,28 +376,27 @@ function wrapWithSetAccess(
 		grafast: {
 			...extensions?.grafast,
 			plan: EXPORTABLE(
-				(CreateSubscriptionStep, attributeName, ogPlan, AccessStep, LoadedRecordStep, fieldName) =>
-					(parent: Step, args, info) => {
-						const steps = parent.operationPlan
-							.getStepsByStepClass(CreateSubscriptionStep)
-						for(const step of steps) {
-							step.diffOnlyFields.add(attributeName)
-						}
+				(AccessStep, CreateSubscriptionStep, LoadedRecordStep, attributeName, fieldName, ogPlan) => (parent: Step, args, info) => {
+					const steps = parent.operationPlan
+						.getStepsByStepClass(CreateSubscriptionStep)
+					for(const step of steps) {
+						step.diffOnlyFields.add(attributeName)
+					}
 
-						if(ogPlan) {
-							return ogPlan(parent, args, info)
-						}
+					if(ogPlan) {
+						return ogPlan(parent, args, info)
+					}
 
-						if(parent instanceof AccessStep || parent instanceof LoadedRecordStep) {
-							return parent.get(fieldName)
-						}
+					if(parent instanceof AccessStep || parent instanceof LoadedRecordStep) {
+						return parent.get(fieldName)
+					}
 
-						throw new Error(
-							'Expected parent to be an AccessStep/LoadedRecordStep, but got: ' +
+					throw new Error(
+						'Expected parent to be an AccessStep/LoadedRecordStep, but got: ' +
 							`${parent.constructor.name} for field ${fieldName}`
-						)
-					},
-				[CreateSubscriptionStep, attributeName, ogPlan, AccessStep, LoadedRecordStep, fieldName]
+					)
+				},
+				[AccessStep, CreateSubscriptionStep, LoadedRecordStep, attributeName, fieldName, ogPlan]
 			)
 		}
 	}
