@@ -255,7 +255,6 @@ export const isUpdatable = (
 	}
 
 	return !!build.behavior.pgResourceMatches(resource, 'bulkUpdate')
-		&& !!build.behavior.pgResourceMatches(resource, 'resource:update')
 }
 
 // Matches upstream PgMutationUpdateDeletePlugin isDeletable check (rc.9+)
@@ -284,7 +283,6 @@ export const isDeletable = (
 	}
 
 	return !!build.behavior.pgResourceMatches(resource, 'bulkDelete')
-		&& !!build.behavior.pgResourceMatches(resource, 'resource:delete')
 }
 
 // Matches upstream PgMutationCreatePlugin isInsertable check (rc.9+)
@@ -308,8 +306,7 @@ export const isInsertable = (
 		return false
 	}
 
-	return build.behavior.pgResourceMatches(resource, 'resource:insert') === true
-		&& build.behavior.pgResourceMatches(resource, 'bulkCreate') === true
+	return build.behavior.pgResourceMatches(resource, 'bulkCreate') === true
 }
 
 export const isInsertableAttribute = (
