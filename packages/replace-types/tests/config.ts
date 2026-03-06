@@ -14,12 +14,20 @@ export const CONFIG: TestGraphileConfig = {
       id SERIAL PRIMARY KEY,
       name TEXT NOT NULL,
       status TEXT NOT NULL DEFAULT 'active',
+      nullable_status TEXT,
+      status_array TEXT[],
+      status_array_not_null TEXT[] NOT NULL,
       metadata JSONB,
-      custom_status "replace_types_test"."custom_status"
+      custom_status "replace_types_test"."custom_status",
+      custom_status_array "replace_types_test"."custom_status"[]
     );
 
     COMMENT ON COLUMN "replace_types_test"."users".status IS E'@replaceType CustomStatus';
+    COMMENT ON COLUMN "replace_types_test"."users".nullable_status IS E'@replaceType CustomStatus';
+    COMMENT ON COLUMN "replace_types_test"."users".status_array IS E'@replaceType CustomStatus';
+    COMMENT ON COLUMN "replace_types_test"."users".status_array_not_null IS E'@replaceType CustomStatus';
     COMMENT ON COLUMN "replace_types_test"."users".custom_status IS E'@replaceType CustomStatus';
+    COMMENT ON COLUMN "replace_types_test"."users".custom_status_array IS E'@replaceType CustomStatus';
 	`,
 	preset: {
 		extends: [PostGraphileAmberPreset],

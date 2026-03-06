@@ -16,7 +16,7 @@ describe('ReplaceTypesPlugin', () => {
     await srv.destroy()
   })
 
-  it('should replace field types based on @replaceType tag', async () => {
+  it('should replace field types and preserve non-null', async () => {
     const { schema } = srv
 
     const userType = schema.getType('User')
@@ -28,8 +28,50 @@ describe('ReplaceTypesPlugin', () => {
     assert.ok(statusField, 'status field should exist')
 
     assert.ok(
-      statusField.type.toString() === 'CustomStatus',
-      `Expected type CustomStatus but got ${statusField.type.toString()}`
+      statusField.type.toString() === 'CustomStatus!',
+      `Expected type CustomStatus! but got ${statusField.type.toString()}`
+    )
+  })
+
+  it('should replace nullable field types', async () => {
+    const { schema } = srv
+
+    const userType = schema.getType('User')
+    const fields = (userType as GraphQLObjectType).getFields()
+    const nullableStatusField = fields['nullableStatus']
+    assert.ok(nullableStatusField, 'nullableStatus field should exist')
+
+    assert.ok(
+      nullableStatusField.type.toString() === 'CustomStatus',
+      `Expected type CustomStatus but got ${nullableStatusField.type.toString()}`
+    )
+  })
+
+  it('should replace array field types', async () => {
+    const { schema } = srv
+
+    const userType = schema.getType('User')
+    const fields = (userType as GraphQLObjectType).getFields()
+    const statusArrayField = fields['statusArray']
+    assert.ok(statusArrayField, 'statusArray field should exist')
+
+    assert.ok(
+      statusArrayField.type.toString() === '[CustomStatus]',
+      `Expected type [CustomStatus] but got ${statusArrayField.type.toString()}`
+    )
+  })
+
+  it('should replace array non-null field types', async () => {
+    const { schema } = srv
+
+    const userType = schema.getType('User')
+    const fields = (userType as GraphQLObjectType).getFields()
+    const statusArrayNotNullField = fields['statusArrayNotNull']
+    assert.ok(statusArrayNotNullField, 'statusArrayNotNull field should exist')
+
+    assert.ok(
+      statusArrayNotNullField.type.toString() === '[CustomStatus]!',
+      `Expected type [CustomStatus]! but got ${statusArrayNotNullField.type.toString()}`
     )
   })
 
@@ -51,8 +93,8 @@ describe('ReplaceTypesPlugin', () => {
   it('should query user with replaced type using enum values', async () => {
     const pool = getSuperuserPool(CONFIG.preset)
     await pool.query(`
-      INSERT INTO replace_types_test.users (name, status, custom_status)
-      VALUES ('John', 'ACTIVE', 'ACTIVE'), ('Jane', 'INACTIVE', 'INACTIVE')
+      INSERT INTO replace_types_test.users (name, status, status_array_not_null, custom_status)
+      VALUES ('John', 'ACTIVE', '{ACTIVE}', 'ACTIVE'), ('Jane', 'INACTIVE', '{INACTIVE}', 'INACTIVE')
     `)
 
     const result = await srv.graphqlRequest<{
@@ -75,7 +117,7 @@ describe('ReplaceTypesPlugin', () => {
     assert.strictEqual(result.allUsers.nodes.length, 2)
   })
 
-  it('should replace input field types based on @replaceType tag', async () => {
+  it('should replace input field types', async () => {
     const { schema } = srv
 
     const userInputType = schema.getType('UserInput')
@@ -87,7 +129,7 @@ describe('ReplaceTypesPlugin', () => {
 
     assert.ok(
       statusField.type.toString() === 'CustomStatus',
-      `Expected type CustomStatus (fallback) but got ${statusField.type.toString()}`
+      `Expected type CustomStatus but got ${statusField.type.toString()}`
     )
   })
 
@@ -101,6 +143,7 @@ describe('ReplaceTypesPlugin', () => {
             user: {
               name: "TestUser"
               status: PENDING
+              statusArrayNotNull: [PENDING]
             }
           }) {
             user {
