@@ -1,6 +1,6 @@
 {
 	"name": "@haathie/postgraphile-replace-types",
-	"version": "0.1.0",
+	"version": "0.1.1",
 	"type": "module",
 	"files": ["lib"],
 	"main": "lib/index.js",
@@ -14,9 +14,6 @@
 	},
 	"scripts": {
 		"build": "tsc -p tsconfig.json"
-	},
-	"dependencies": {
-		"@haathie/postgraphile-common-utils": "^0.1.2"
 	},
 	"peerDependencies": {
 		"postgraphile": "*"
