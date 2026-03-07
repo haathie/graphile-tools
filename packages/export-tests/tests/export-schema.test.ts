@@ -8,7 +8,7 @@ import { RateLimitsPlugin } from '../../rate-limits/src/index.ts'
 import { PgRealtimePlugin } from '../../realtime/src/index.ts'
 import { ReasonableLimitsPlugin } from '../../reasonable-limits/src/index.ts'
 import { TargetedConditionsPlugin } from '../../targeted-conditions/src/index.ts'
-import { type BootedGraphileServer, runDdlAndBoot, type TestGraphileConfig } from './index.ts'
+import { type BootedGraphileServer, runDdlAndBoot, type TestGraphileConfig } from '@haathie/postgraphile-common-utils/tests'
 
 function makePgSvc(schemas: string[]) {
 	return makePgService({

@@ -1,0 +1,9 @@
+{
+	"name": "@haathie/graphile-export-tests",
+	"version": "0.1.0",
+	"type": "module",
+	"private": true,
+	"dependencies": {
+		"@haathie/postgraphile-common-utils": "^0.1.2"
+	}
+}
