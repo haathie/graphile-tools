@@ -59,6 +59,18 @@ input ContactNameCondition @oneOf {
 
 This allows for adding/removing filter types without breaking existing queries. For example, if you add a new filter type for "equals in" to the "name" column, and the above query will still work without any changes.
 
+## Making Conditions Required
+
+By default, all conditions are optional. However, you can make a condition required by adding a `filterRequired` behaviour.
+
+``` sql
+COMMENT ON COLUMN app.contacts.name is $$
+@behaviour filterType:icontains filterType:eq filterRequired
+$$;
+```
+
+This will make the `condition` argument for the `name` field required in the GraphQL schema, and it will also make sure that at least one of the filter types is provided in the query.
+
 ## Relational Conditions
 
 Let's say we have a `contacts` table and a `tags` table, with each contact having multiple tags. We can add a filter to the `contacts` table to filter by tags. We'll create a ref and add `filterable` behaviour to it.
