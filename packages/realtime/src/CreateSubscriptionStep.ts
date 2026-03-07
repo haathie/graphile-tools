@@ -7,6 +7,10 @@ import type { PgWhereBuilder } from './PgWhereBuilder.ts'
 import { DEBUG } from './utils.ts'
 
 export class CreateSubscriptionStep extends Step<any> {
+	static $$export = {
+		moduleName: '@haathie/postgraphile-realtime/lib/CreateSubscriptionStep.js',
+		exportName: 'CreateSubscriptionStep',
+	}
 
 	#resource: PgResource
 	#subSrc: SubscriptionManager

@@ -15,7 +15,7 @@ export function buildFieldsForCreate(
 	build: GraphileBuild.Build,
 	path: string[] = []
 ): GraphileBuild.GrafastInputObjectTypeConfig['fields'] {
-	const { inflection, graphql: { GraphQLNonNull, GraphQLList } } = build
+	const { inflection, EXPORTABLE, graphql: { GraphQLNonNull, GraphQLList } } = build
 	// relation name => type name
 	const upsertRelations: { [relname: string]: string } = {}
 	const forwardAttrs = getForwardRelationAttrs(table)
@@ -90,13 +90,13 @@ export function buildFieldsForCreate(
 							: new GraphQLList(new GraphQLNonNull(type)),
 						extensions: {
 							grafast: {
-								apply(plan: PgRowBuilder) {
+								apply: EXPORTABLE((isUnique, relName) => (plan: PgRowBuilder) => {
 									if(isUnique) {
 										return plan.setRelation(relName)
 									}
 
 									return () => plan.setRelation(relName)
-								}
+								}, [isUnique, relName])
 							}
 						}
 					}
@@ -283,6 +283,7 @@ export const isDeletable = (
 	}
 
 	return !!build.behavior.pgResourceMatches(resource, 'bulkDelete')
+		&& !!build.behavior.pgResourceMatches(resource, 'resource:delete')
 }
 
 // Matches upstream PgMutationCreatePlugin isInsertable check (rc.9+)
@@ -306,11 +307,8 @@ export const isInsertable = (
 		return false
 	}
 
-	if(!resource.extensions?.canInsert) {
-		return false
-	}
-
-	return build.behavior.pgResourceMatches(resource, 'bulkCreate') === true
+	return build.behavior.pgResourceMatches(resource, 'resource:insert') === true
+		&& build.behavior.pgResourceMatches(resource, 'bulkCreate') === true
 }
 
 export const isInsertableAttribute = (
@@ -328,16 +326,17 @@ export const isInsertableAttribute = (
 function buildApplyPlanForCodec(
 	name: string,
 	{ codec }: PgCodecAttribute,
-	{ inflection }: GraphileBuild.Build,
+	{ inflection, EXPORTABLE }: GraphileBuild.Build,
 ) {
 	const fieldAttrMap = buildFieldNameToAttrNameMap(codec, inflection)
-	const plan: InputObjectFieldApplyResolver<PgRowBuilder> = ($step, input) => {
-		if(!fieldAttrMap) {
-			return $step.set(name, input)
-		}
+	return EXPORTABLE(
+		(fieldAttrMap, mapFieldsToAttrs, name) => (($step, input) => {
+			if(!fieldAttrMap) {
+				return $step.set(name, input)
+			}
 
-		return $step.set(name, mapFieldsToAttrs(input, fieldAttrMap))
-	}
-
-	return plan
+			return $step.set(name, mapFieldsToAttrs(input, fieldAttrMap))
+		}) as InputObjectFieldApplyResolver<PgRowBuilder>,
+		[fieldAttrMap, mapFieldsToAttrs, name]
+	)
 }

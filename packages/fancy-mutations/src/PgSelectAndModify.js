@@ -9,6 +9,10 @@ import { sql } from 'postgraphile/pg-sql2'
  * Selects some rows from a resource and then modifies them.
  */
 export class PgSelectAndModify extends PgSelectStep {
+	static $$export = {
+		moduleName: '@haathie/postgraphile-fancy-mutations/lib/PgSelectAndModify.js',
+		exportName: 'PgSelectAndModify',
+	}
 
 	/**
 	 * @type {'delete' | 'update'}

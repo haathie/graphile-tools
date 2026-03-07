@@ -147,3 +147,8 @@ export function mapFieldsToAttrs(
 
 	return attrs
 }
+
+mapFieldsToAttrs.$$export = {
+	moduleName: '@haathie/postgraphile-common-utils/lib/index.js',
+	exportName: 'mapFieldsToAttrs',
+}

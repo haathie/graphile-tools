@@ -102,6 +102,7 @@ export const RateLimitsPlugin: GraphileConfig.Plugin = {
 
 				const rlsTags = codec.extensions?.haathieRateLimits
 				const {
+					EXPORTABLE,
 					options: {
 						haathieRateLimits: {
 							rateLimitsConfig = {},
@@ -141,26 +142,29 @@ export const RateLimitsPlugin: GraphileConfig.Plugin = {
 
 				const ogPlan = type.plan || type.extensions?.grafast?.plan
 				// we'll wrap the existing plan to add the rate limits step
-				type.plan = (plan, args, info) => {
-					// we'll find if an existing RateLimitsStep is present at
-					// some level in the plan. If it is, we'll apply the rate limit
-					// to that step, otherwise we'll create a new RateLimitsStep.
-					// Using this slightly hacky way as "deduplication" of the
-					// "side effects" steps doesn't seem to work
-					let step: RateLimitsStep | undefined
-					if(plan instanceof Step) {
-						const existingSteps = plan.operationPlan
-							.getStepsByStepClass(RateLimitsStep)
-						step = existingSteps.at(0)
-					}
+				type.plan = EXPORTABLE(
+					(RateLimitsStep, Step, apiName, fieldName, get, ogPlan, rateLimits) => (plan, args, info) => {
+						// we'll find if an existing RateLimitsStep is present at
+						// some level in the plan. If it is, we'll apply the rate limit
+						// to that step, otherwise we'll create a new RateLimitsStep.
+						// Using this slightly hacky way as "deduplication" of the
+						// "side effects" steps doesn't seem to work
+						let step: RateLimitsStep | undefined
+						if(plan instanceof Step) {
+							const existingSteps = plan.operationPlan
+								.getStepsByStepClass(RateLimitsStep)
+							step = existingSteps.at(0)
+						}
 
-					if(!step) {
-						step = new RateLimitsStep()
-					}
+						if(!step) {
+							step = new RateLimitsStep()
+						}
 
-					step.setRateLimits(apiName, rateLimits)
-					return ogPlan?.(plan, args, info) || get(plan, fieldName)
-				}
+						step.setRateLimits(apiName, rateLimits)
+						return ogPlan?.(plan, args, info) || get(plan, fieldName)
+					},
+					[RateLimitsStep, Step, apiName, fieldName, get, ogPlan, rateLimits]
+				)
 
 				return type
 			},

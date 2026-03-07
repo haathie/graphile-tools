@@ -4,10 +4,14 @@ import {
 	pgWhereConditionSpecListToSQL,
 } from 'postgraphile/@dataplan/pg'
 import { type ApplyInputStep, ConstantStep, type ExecutionDetails, type ExecutionResults, Step } from 'postgraphile/grafast'
-import { isSQL, type SQL } from 'postgraphile/pg-sql2'
+import { type SQL } from 'postgraphile/pg-sql2'
 
 export class PgWhereBuilder extends Step<SQL | undefined>
 	implements PgConditionCapableParent {
+	static $$export = {
+		moduleName: '@haathie/postgraphile-realtime/lib/PgWhereBuilder.js',
+		exportName: 'PgWhereBuilder',
+	}
 
 	alias: SQL
 	private condition?: SQL
@@ -20,11 +24,7 @@ export class PgWhereBuilder extends Step<SQL | undefined>
 	}
 
 	where(condition: PgWhereConditionSpec<any>): void {
-		if(!isSQL(condition)) {
-			throw new Error('Condition must be a SQL expression')
-		}
-
-		this.condition = condition
+		this.condition = condition as SQL
 	}
 
 	having(): void {

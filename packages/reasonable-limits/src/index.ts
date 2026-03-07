@@ -20,6 +20,7 @@ export const ReasonableLimitsPlugin: GraphileConfig.Plugin = {
 					},
 				} = ctx
 				const {
+					EXPORTABLE,
 					grafast: { sideEffect },
 					graphql: { GraphQLError }
 				} = build
@@ -34,42 +35,46 @@ export const ReasonableLimitsPlugin: GraphileConfig.Plugin = {
 				const maxValue = getIntTag(codec, MAX_RECORDS_TAG) || MAX_RECORDS_PER_PAGE
 
 				const ogPlan = fields.plan
-				fields.plan = (...params) => {
-					const [, args] = params
-					sideEffect(args.getRaw(), arg => {
-						assertLessThanMax(arg, 'first', maxValue)
-						assertLessThanMax(arg, 'last', maxValue)
+				fields.plan = EXPORTABLE(
+					(GraphQLError, maxValue, ogPlan, sideEffect) => (...params) => {
+						const [, args] = params
+						sideEffect(args.getRaw(), arg => {
+							assertLessThanMax(arg, 'first', maxValue)
+							assertLessThanMax(arg, 'last', maxValue)
 
-						if(
-							typeof arg.first === 'number'
-							|| typeof arg.last === 'number'
-						) {
-							return
+							if(
+								typeof arg.first === 'number'
+									|| typeof arg.last === 'number'
+							) {
+								return
+							}
+
+							if(arg.first === null || arg.last === null) {
+								throw new GraphQLError(
+									'"first" or "last" cannot be null without a number being provided'
+										+ ' for the other',
+									{ extensions: { statusCode: 400 } }
+								)
+							}
+						})
+
+						return ogPlan?.(...params)
+
+						// eslint-disable-next-line unicorn/consistent-function-scoping
+						function assertLessThanMax(obj: any, key: string, max: number) {
+							const value = obj[key]
+							if(typeof value === 'number' && value > max) {
+								throw new GraphQLError(
+									`Maximum of ${max} ${key} records can be requested per page`,
+									{ extensions: { statusCode: 400 } }
+								)
+							}
 						}
-
-						if(arg.first === null || arg.last === null) {
-							throw new GraphQLError(
-								'"first" or "last" cannot be null without a number being provided'
-								+ ' for the other',
-								{ extensions: { statusCode: 400 } }
-							)
-						}
-					})
-
-					return ogPlan?.(...params)
-				}
+					},
+					[GraphQLError, maxValue, ogPlan, sideEffect]
+				)
 
 				return fields
-
-				function assertLessThanMax(obj: any, key: string, max: number) {
-					const value = obj[key]
-					if(typeof value === 'number' && value > max) {
-						throw new GraphQLError(
-							`Maximum of ${max} ${key} records can be requested per page`,
-							{ extensions: { statusCode: 400 } }
-						)
-					}
-				}
 			},
 			'GraphQLObjectType_fields_field_args_arg'(input, build, ctx) {
 				const {

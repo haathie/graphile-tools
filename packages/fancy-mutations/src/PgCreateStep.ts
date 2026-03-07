@@ -24,6 +24,10 @@ type RowValue<T> = { constant: T }
 const MAX_BULK_MUTATION_LENGTH = 1000
 
 export class PgCreateStep extends Step<{ items: PlainObject[] }> {
+	static $$export = {
+		moduleName: '@haathie/postgraphile-fancy-mutations/lib/PgCreateStep.js',
+		exportName: 'PgCreateStep',
+	}
 
 	readonly resource: PgTableResource
 	readonly #contextId: number
@@ -219,6 +223,10 @@ export class PgCreateStep extends Step<{ items: PlainObject[] }> {
 }
 
 export class PgRowBuilder extends Modifier<PgCreateContainer> {
+	static $$export = {
+		moduleName: '@haathie/postgraphile-fancy-mutations/lib/PgCreateStep.js',
+		exportName: 'PgRowBuilder',
+	}
 
 	readonly resource: PgTableResource
 	readonly #values: Record<string, RowValue<unknown>> = {}

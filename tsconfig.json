@@ -9,7 +9,6 @@
     "erasableSyntaxOnly": true,
     "rewriteRelativeImportExtensions": true,
     "allowJs": true,
-    "baseUrl": ".",
     "paths": {},
     "declaration": true
   },
